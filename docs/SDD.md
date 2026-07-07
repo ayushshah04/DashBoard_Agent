@@ -503,7 +503,7 @@ The frontend keeps `latestAgentResult`, which is updated from `assistant_text` a
 
 `submitAgentPrompt()` centralizes prompt submission for the normal form and the trade buttons. It uses `agentBusy` to prevent overlapping runs.
 
-The Trade Board stores recent records in browser `localStorage` under `jarvis-trade-records-v1`. `makeTradeRecord()` adds a row immediately when the user requests a ticket, paper execution, or scout cycle. Agent prompts request a final `TRADE_RECORD` block with `status`, `symbol`, `asset_class`, `direction`, `entry`, `exit_target`, `stop`, `quantity_or_notional`, `order_id`, and `reason`; `updatePendingTradeRecord()` parses that block and updates the row.
+The Trade Board renders directly after the account fund strip and stores recent records in browser `localStorage` under `jarvis-trade-records-v1`. `makeTradeRecord()` adds a row immediately when the user requests a ticket, paper execution, or scout cycle. Agent prompts request a final `TRADE_RECORD` block with `status`, `symbol`, `asset_class`, `direction`, `entry`, `exit_target`, `stop`, `quantity_or_notional`, `order_id`, and `reason`; `updatePendingTradeRecord()` parses that block and updates the row. The board renders every saved record and uses a bounded scroll area with a sticky header for long ticket lists.
 
 The Risk Management inputs call `saveRiskSettings()`, which posts the current limits to `/api/risk/settings`, reloads `/api/trading/config`, updates the visible `Risk` cockpit text, and feeds the same risk settings into later trade action prompts.
 

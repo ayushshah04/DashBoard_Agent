@@ -106,7 +106,7 @@ The Trade Action Center captures the latest agent research result and lets you:
 - Execute one small paper trade when paper order tools are available and risk checks pass.
 - Start or stop a continuous paper scout that scans markets every five minutes.
 
-The Trade Board below it stores recent tickets/execution requests in the browser and shows symbol, status, entry, exit/target, stop, size, and update time. Agent trade prompts ask for a final `TRADE_RECORD` block so those fields can update from the result.
+The Trade Board sits directly after the Portfolio, Buying Power, Cash, Equity, and Status cards. It stores recent tickets/execution requests in the browser and shows symbol, status, entry, exit/target, stop, size, and update time in a scrollable table. Agent trade prompts ask for a final `TRADE_RECORD` block so those fields can update from the result.
 
 The continuous scout does not auto-execute live trades. In live mode it prepares a trade ticket unless live tools are explicitly unlocked and the user sends a direct execution request.
 
