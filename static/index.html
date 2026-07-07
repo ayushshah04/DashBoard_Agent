@@ -174,7 +174,7 @@
     }
     main {
       display: grid;
-      grid-template-rows: auto auto auto auto auto auto auto auto 1fr auto;
+      grid-template-rows: auto auto auto auto auto auto auto auto auto 1fr auto;
       min-width: 0;
       overflow: hidden;
     }
@@ -413,6 +413,20 @@
       padding: 10px;
       border-top: 1px solid var(--line);
     }
+    .form-actions {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      align-content: stretch;
+    }
+    .form-actions button {
+      min-width: 104px;
+    }
+    #clearChat {
+      color: var(--amber);
+      border-color: rgba(255, 200, 107, 0.38);
+      background: rgba(38, 29, 10, 0.48);
+    }
     textarea, input, select {
       width: 100%;
       min-height: 44px;
@@ -520,6 +534,52 @@
       color: var(--amber);
       border-color: rgba(255, 200, 107, 0.34);
       background: rgba(38, 29, 10, 0.36);
+    }
+    .calendar-summary {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .calendar-card {
+      border: 1px solid rgba(115, 220, 255, 0.18);
+      border-radius: 8px;
+      padding: 9px;
+      background: rgba(7, 16, 20, 0.72);
+    }
+    .calendar-card span,
+    .calendar-row span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 3px;
+    }
+    .calendar-card strong {
+      color: var(--green);
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+    .calendar-row {
+      border: 1px solid rgba(115, 220, 255, 0.18);
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: rgba(7, 16, 20, 0.82);
+      color: var(--muted);
+    }
+    .calendar-row strong {
+      display: block;
+      color: var(--cyan);
+      margin-bottom: 3px;
+      overflow-wrap: anywhere;
+    }
+    .calendar-row small {
+      display: block;
+      color: var(--muted);
+      line-height: 1.45;
+      overflow-wrap: anywhere;
     }
     .pill small {
       display: block;
@@ -636,6 +696,17 @@
       color: var(--green);
       font-size: 14px;
       overflow-wrap: anywhere;
+    }
+    .portfolio-metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(7, 16, 20, 0.48);
+    }
+    .portfolio-metrics .fund-card strong {
+      color: var(--cyan);
     }
     .market-board {
       display: grid;
@@ -838,6 +909,7 @@
       .right { grid-template-rows: auto auto; }
       .cockpit { grid-template-columns: 1fr; }
       .fund-strip { grid-template-columns: 1fr 1fr; }
+      .portfolio-metrics { grid-template-columns: 1fr 1fr; }
       .market-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .market-row { grid-template-columns: 1.2fr 1fr 1fr; }
       .market-trend, .market-time { grid-column: auto; text-align: left; }
@@ -854,6 +926,7 @@
       .trade-row { grid-template-columns: 1fr 1fr 1fr; }
       .vault-fields { grid-template-columns: 1fr; }
       form { grid-template-columns: 1fr; }
+      .form-actions { grid-template-columns: 1fr 1fr; }
       button { min-height: 46px; }
     }
   </style>
@@ -893,6 +966,13 @@
         <div class="fund-card"><span>Cash</span><strong id="fundCash">--</strong></div>
         <div class="fund-card"><span>Equity</span><strong id="fundEquity">--</strong></div>
         <div class="fund-card"><span>Status</span><strong id="fundStatus">--</strong></div>
+      </div>
+      <div class="portfolio-metrics">
+        <div class="fund-card"><span>Trades</span><strong id="metricTrades">--</strong></div>
+        <div class="fund-card"><span>Win Rate</span><strong id="metricWinRate">--</strong></div>
+        <div class="fund-card"><span>Win / Loss</span><strong id="metricWinLoss">--</strong></div>
+        <div class="fund-card"><span>R:R Ratio</span><strong id="metricRewardRisk">--</strong></div>
+        <div class="fund-card"><span>Exposure Ratio</span><strong id="metricExposure">--</strong></div>
       </div>
       <div class="trade-board">
         <div class="trade-board-head">
@@ -983,7 +1063,10 @@
       <div class="feed" id="feed"></div>
       <form id="form">
         <textarea id="prompt" placeholder="Ask Jarvis to build code, inspect files, run Python, or query Alpaca market tools..."></textarea>
-        <button id="send" type="submit">Run</button>
+        <div class="form-actions">
+          <button id="clearChat" type="button">Clear Chat</button>
+          <button id="send" type="submit">Run</button>
+        </div>
       </form>
     </main>
 
@@ -994,6 +1077,7 @@
         <button data-panel="panel-news" type="button">News</button>
         <button data-panel="panel-research" type="button">Research</button>
         <button data-panel="panel-vault" type="button">Vault</button>
+        <button data-panel="panel-calendar" type="button">Calendar</button>
         <button data-panel="panel-video" type="button">Video</button>
       </div>
       <section class="dock-panel active" id="panel-tools">
@@ -1082,6 +1166,16 @@
         <div class="list" id="vaultSummary"></div>
         <div class="list" id="vaultResults"></div>
       </section>
+      <section class="dock-panel" id="panel-calendar">
+        <h2>Trade Calendar</h2>
+        <div class="calendar-summary">
+          <div class="calendar-card"><span>Today Trades</span><strong id="calendarTodayTrades">--</strong></div>
+          <div class="calendar-card"><span>Today W / L</span><strong id="calendarTodayWinLoss">--</strong></div>
+          <div class="calendar-card"><span>Total Wins</span><strong id="calendarTotalWins">--</strong></div>
+          <div class="calendar-card"><span>Total Losses</span><strong id="calendarTotalLosses">--</strong></div>
+        </div>
+        <div class="list" id="calendarDays"></div>
+      </section>
       <section class="dock-panel" id="panel-video">
         <h2>Live News Video</h2>
         <div class="list" id="videoSlot"></div>
@@ -1093,6 +1187,7 @@
     const feed = document.querySelector("#feed");
     const form = document.querySelector("#form");
     const promptBox = document.querySelector("#prompt");
+    const clearChat = document.querySelector("#clearChat");
     const send = document.querySelector("#send");
     const statusEl = document.querySelector("#status");
     const toolsEl = document.querySelector("#tools");
@@ -1113,6 +1208,11 @@
     const fundCash = document.querySelector("#fundCash");
     const fundEquity = document.querySelector("#fundEquity");
     const fundStatus = document.querySelector("#fundStatus");
+    const metricTrades = document.querySelector("#metricTrades");
+    const metricWinRate = document.querySelector("#metricWinRate");
+    const metricWinLoss = document.querySelector("#metricWinLoss");
+    const metricRewardRisk = document.querySelector("#metricRewardRisk");
+    const metricExposure = document.querySelector("#metricExposure");
     const marketGroupTitle = document.querySelector("#marketGroupTitle");
     const marketStatus = document.querySelector("#marketStatus");
     const marketTabs = document.querySelector("#marketTabs");
@@ -1171,6 +1271,11 @@
     const summarizeVault = document.querySelector("#summarizeVault");
     const vaultSummary = document.querySelector("#vaultSummary");
     const vaultResults = document.querySelector("#vaultResults");
+    const calendarTodayTrades = document.querySelector("#calendarTodayTrades");
+    const calendarTodayWinLoss = document.querySelector("#calendarTodayWinLoss");
+    const calendarTotalWins = document.querySelector("#calendarTotalWins");
+    const calendarTotalLosses = document.querySelector("#calendarTotalLosses");
+    const calendarDays = document.querySelector("#calendarDays");
     const videoSlot = document.querySelector("#videoSlot");
     const panelTabs = Array.from(document.querySelectorAll(".panel-tabs button"));
     const dockPanels = Array.from(document.querySelectorAll(".dock-panel"));
@@ -1193,6 +1298,7 @@
     let watchSnapshotItems = [];
     let tradeRecords = [];
     let pendingTradeRecordId = null;
+    let latestPortfolioValue = 0;
 
     function addBubble(text, kind = "") {
       const div = document.createElement("div");
@@ -1211,6 +1317,157 @@
 
     function compactAgentContext(text) {
       return (text || "").trim().slice(-5000);
+    }
+
+    function todayIsoDate() {
+      return new Date().toISOString().slice(0, 10);
+    }
+
+    function tradeDateLabel(dateKey) {
+      if (!dateKey) return "Today";
+      const parsed = new Date(`${dateKey}T12:00:00`);
+      if (Number.isNaN(parsed.getTime())) return dateKey;
+      return parsed.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+    }
+
+    function normalizeRecordDate(record) {
+      return record.tradeDate || record.date || todayIsoDate();
+    }
+
+    function numberFromTradeText(text) {
+      const match = String(text || "").replace(/,/g, "").match(/-?\$?\s*(\d+(?:\.\d+)?)/);
+      return match ? Number(match[1]) : NaN;
+    }
+
+    function dollarFromTradeText(text) {
+      const match = String(text || "").replace(/,/g, "").match(/\$\s*(\d+(?:\.\d+)?)/);
+      return match ? Number(match[1]) : NaN;
+    }
+
+    function tradeOutcome(record) {
+      const text = `${record.outcome || ""} ${record.status || ""} ${record.reason || ""}`.toLowerCase();
+      if (/\b(win|profit|profitable|target hit|take profit|tp hit|gain)\b/.test(text)) return "win";
+      if (/\b(loss|loser|stopped|stop hit|drawdown|red)\b/.test(text)) return "loss";
+      if (text.includes("blocked") || text.includes("rejected")) return "blocked";
+      if (text.includes("skip") || text.includes("no trade") || text.includes("do nothing")) return "skipped";
+      if (text.includes("executed") || text.includes("filled") || text.includes("submitted")) return "open";
+      if (text.includes("ticket")) return "ticket";
+      return "open";
+    }
+
+    function tradeNotional(record) {
+      const fromSize = dollarFromTradeText(record.size);
+      if (Number.isFinite(fromSize)) return fromSize;
+      const entry = numberFromTradeText(record.entry);
+      const qty = numberFromTradeText(record.size);
+      if (Number.isFinite(entry) && Number.isFinite(qty) && /share|qty|contract/i.test(record.size || "")) {
+        return entry * qty;
+      }
+      return 0;
+    }
+
+    function rewardRiskRatio(record) {
+      const entry = numberFromTradeText(record.entry);
+      const target = numberFromTradeText(record.exitTarget);
+      const stop = numberFromTradeText(record.stop);
+      if (![entry, target, stop].every(Number.isFinite)) return NaN;
+      const reward = Math.abs(target - entry);
+      const riskValue = Math.abs(entry - stop);
+      if (!reward || !riskValue) return NaN;
+      return reward / riskValue;
+    }
+
+    function tradeAnalytics() {
+      const counts = { wins: 0, losses: 0, skipped: 0, blocked: 0, open: 0, ticket: 0 };
+      let activeNotional = 0;
+      const ratios = [];
+      tradeRecords.forEach((record) => {
+        const outcome = tradeOutcome(record);
+        if (outcome === "win") counts.wins += 1;
+        else if (outcome === "loss") counts.losses += 1;
+        else if (outcome === "skipped") counts.skipped += 1;
+        else if (outcome === "blocked") counts.blocked += 1;
+        else if (outcome === "ticket") counts.ticket += 1;
+        else counts.open += 1;
+
+        if (!["skipped", "blocked", "loss"].includes(outcome)) {
+          activeNotional += tradeNotional(record);
+        }
+        const ratio = rewardRiskRatio(record);
+        if (Number.isFinite(ratio)) ratios.push(ratio);
+      });
+      const closed = counts.wins + counts.losses;
+      const avgRatio = ratios.length ? ratios.reduce((sum, value) => sum + value, 0) / ratios.length : NaN;
+      return { counts, closed, activeNotional, avgRatio };
+    }
+
+    function renderTradeAnalytics() {
+      const analytics = tradeAnalytics();
+      const { counts, closed, activeNotional, avgRatio } = analytics;
+      metricTrades.textContent = `${tradeRecords.length} tracked`;
+      metricWinRate.textContent = closed ? `${Math.round((counts.wins / closed) * 100)}%` : "--";
+      metricWinLoss.textContent = `${counts.wins} / ${counts.losses}`;
+      metricRewardRisk.textContent = Number.isFinite(avgRatio) ? `${avgRatio.toFixed(2)}x` : "--";
+      metricExposure.textContent = latestPortfolioValue && activeNotional
+        ? `${((activeNotional / latestPortfolioValue) * 100).toFixed(2)}%`
+        : "--";
+      renderTradeCalendar(analytics);
+    }
+
+    function renderTradeCalendar(analytics = tradeAnalytics()) {
+      const groups = new Map();
+      tradeRecords.forEach((record) => {
+        const key = normalizeRecordDate(record);
+        if (!groups.has(key)) {
+          groups.set(key, { total: 0, wins: 0, losses: 0, skipped: 0, blocked: 0, open: 0, ticket: 0, symbols: new Set() });
+        }
+        const day = groups.get(key);
+        const outcome = tradeOutcome(record);
+        day.total += 1;
+        if (outcome === "win") day.wins += 1;
+        else if (outcome === "loss") day.losses += 1;
+        else if (outcome === "skipped") day.skipped += 1;
+        else if (outcome === "blocked") day.blocked += 1;
+        else if (outcome === "ticket") day.ticket += 1;
+        else day.open += 1;
+        if (record.symbol) day.symbols.add(record.symbol);
+      });
+
+      const today = groups.get(todayIsoDate()) || { total: 0, wins: 0, losses: 0 };
+      calendarTodayTrades.textContent = String(today.total || 0);
+      calendarTodayWinLoss.textContent = `${today.wins || 0} / ${today.losses || 0}`;
+      calendarTotalWins.textContent = String(analytics.counts.wins);
+      calendarTotalLosses.textContent = String(analytics.counts.losses);
+      calendarDays.innerHTML = "";
+
+      if (!tradeRecords.length) {
+        const empty = document.createElement("div");
+        empty.className = "calendar-row";
+        empty.innerHTML = "<strong>No trade history yet</strong><small>Trade Ticket, Execute Paper, and Scout records will appear here by day.</small>";
+        calendarDays.appendChild(empty);
+        return;
+      }
+
+      [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0])).forEach(([dateKey, day]) => {
+        const row = document.createElement("div");
+        row.className = "calendar-row";
+        const symbols = [...day.symbols].slice(0, 8).join(", ") || "--";
+        row.innerHTML = `
+          <span>${tradeDateLabel(dateKey)}</span>
+          <strong>${day.total} trades | W ${day.wins} / L ${day.losses}</strong>
+          <small>Open ${day.open} | Tickets ${day.ticket} | Skipped ${day.skipped} | Blocked ${day.blocked}</small>
+          <small>${symbols}</small>
+        `;
+        calendarDays.appendChild(row);
+      });
+    }
+
+    function clearChatFeed() {
+      feed.innerHTML = "";
+      latestAgentResult = "";
+      pendingTradeRecordId = null;
+      updateTradeActionState();
+      addActivity("Chat cleared from the command deck.", true);
     }
 
     function updateTradeActionState() {
@@ -1234,13 +1491,15 @@
     }
 
     function saveTradeRecords() {
-      localStorage.setItem(tradeRecordsKey, JSON.stringify(tradeRecords.slice(0, 12)));
+      localStorage.setItem(tradeRecordsKey, JSON.stringify(tradeRecords.slice(0, 250)));
     }
 
     function loadTradeRecords() {
       try {
         const parsed = JSON.parse(localStorage.getItem(tradeRecordsKey) || "[]");
-        tradeRecords = Array.isArray(parsed) ? parsed : [];
+        tradeRecords = Array.isArray(parsed)
+          ? parsed.map((record) => ({ ...record, tradeDate: normalizeRecordDate(record) }))
+          : [];
       } catch {
         tradeRecords = [];
       }
@@ -1270,6 +1529,7 @@
           empty.appendChild(span);
         });
         tradeBoardRows.appendChild(empty);
+        renderTradeAnalytics();
         return;
       }
 
@@ -1293,6 +1553,7 @@
         row.title = record.reason || record.source || "";
         tradeBoardRows.appendChild(row);
       });
+      renderTradeAnalytics();
     }
 
     function makeTradeRecord(kind, prompt) {
@@ -1310,11 +1571,12 @@
         orderId: "",
         reason: "",
         source: compactAgentContext(prompt),
+        tradeDate: todayIsoDate(),
         createdAt: now,
         updatedAt: now,
       };
       tradeRecords.unshift(record);
-      tradeRecords = tradeRecords.slice(0, 12);
+      tradeRecords = tradeRecords.slice(0, 250);
       pendingTradeRecordId = record.id;
       saveTradeRecords();
       renderTradeBoard();
@@ -1344,6 +1606,7 @@
       const symbol = fieldFromText(source, ["symbol", "ticker"]) || (source.match(/\b[A-Z]{1,5}(?:\/USD)?\b/) || [currentTicker()])[0];
       return {
         status: fieldFromText(source, ["status", "decision"]) || inferTradeStatus(source),
+        outcome: fieldFromText(source, ["outcome", "result"]) || "",
         symbol,
         direction: fieldFromText(source, ["direction", "side"]) || "--",
         entry: fieldFromText(source, ["entry", "entry price", "limit price", "filled price", "average fill price"]) || "--",
@@ -1375,13 +1638,14 @@
           orderId: "",
           reason: "",
           source: "",
+          tradeDate: todayIsoDate(),
           createdAt: now,
           updatedAt: now,
         };
         tradeRecords.unshift(record);
       }
       if (!record) return;
-      Object.assign(record, parsed, { updatedAt: now });
+      Object.assign(record, parsed, { tradeDate: record.tradeDate || todayIsoDate(), updatedAt: now });
       saveTradeRecords();
       renderTradeBoard();
     }
@@ -1995,11 +2259,13 @@
         const acct = data.account || {};
         const currency = data.currency || "USD";
         accountCurrency.textContent = currency;
+        latestPortfolioValue = Number(acct.portfolio_value || acct.equity || 0) || 0;
         fundPortfolio.textContent = formatMoney(acct.portfolio_value, currency);
         fundBuyingPower.textContent = formatMoney(acct.buying_power, currency);
         fundCash.textContent = formatMoney(acct.cash, currency);
         fundEquity.textContent = formatMoney(acct.equity, currency);
         fundStatus.textContent = `${data.mode || "paper"} | ${acct.status || "unknown"}`;
+        renderTradeAnalytics();
       } catch (error) {
         fundStatus.textContent = "Error";
         addActivity(`Alpaca funds failed: ${error.message}`);
@@ -2486,6 +2752,7 @@ Do not place an order in this step.
 End your answer with this exact block so the dashboard can update the Trade Board:
 TRADE_RECORD
 status: Ticket ready or Skipped
+outcome: open, win, loss, skipped, or blocked
 symbol:
 asset_class:
 direction:
@@ -2518,6 +2785,7 @@ Rules:
 End your answer with this exact block so the dashboard can update the Trade Board:
 TRADE_RECORD
 status: Executed paper, Skipped, or Blocked
+outcome: open, win, loss, skipped, or blocked
 symbol:
 asset_class:
 direction:
@@ -2546,6 +2814,7 @@ Return: cycle number, scanned universe, chosen candidate, execute/skip decision,
 End your answer with this exact block so the dashboard can update the Trade Board:
 TRADE_RECORD
 status: Executed paper, Ticket ready, Skipped, or Blocked
+outcome: open, win, loss, skipped, or blocked
 symbol:
 asset_class:
 direction:
@@ -2669,6 +2938,7 @@ END_TRADE_RECORD`;
       event.preventDefault();
       submitAgentPrompt(promptBox.value, "Manual prompt submitted");
     });
+    clearChat.addEventListener("click", clearChatFeed);
 
     addTicker.addEventListener("click", () => addTickerToWatchlist(tickerInput.value));
     tickerInput.addEventListener("keydown", (event) => {

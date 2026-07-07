@@ -129,7 +129,9 @@ The Trade Action Center sits under the market/risk cockpit. It captures the late
 - `Execute Paper`: use the latest result to execute at most one small paper trade if paper order tools are available and the setup passes risk checks.
 - `Start Scout` / `Stop Scout`: run a continuous paper scout every five minutes to scan configured markets and watchlist names for the best risk-adjusted setup.
 
-The Trade Board records recent tickets and execution requests directly under the Portfolio, Buying Power, Cash, Equity, and Status cards. It shows symbol, status, entry, exit/target, stop, size, and last update time in a scrollable table.
+The Portfolio Metrics strip records tracked trades, win rate, win/loss count, reward/risk ratio, and exposure ratio under the funds cards. The Trade Board records recent tickets and execution requests below those metrics. It shows symbol, status, entry, exit/target, stop, size, and last update time in a scrollable table.
+
+The `Clear Chat` button stays beside the command `Run` button so the user can reset the chat feed without scrolling. The Calendar tab groups saved trade records by day and shows total trades, wins, losses, skipped records, blocked records, and symbols for each day.
 
 The Risk Management strip lets the user adjust order notional, max position size, daily loss limit, and options contract count without editing `.env`. Saved dashboard overrides update the visible Risk line and are included in future trade-ticket and paper-execution prompts.
 
