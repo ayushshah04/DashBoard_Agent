@@ -1,0 +1,9 @@
+.env
+mcp_config.json
+workspace/
+__pycache__/
+*.pyc
+.venv/
+dist/
+build/
+

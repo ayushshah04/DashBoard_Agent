@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "workspace": {
+      "enabled": true,
+      "command": "python",
+      "args": ["mcp_server_example.py"],
+      "env": {
+        "JARVIS_WORKSPACE": "workspace"
+      }
+    },
+    "alpaca": {
+      "enabled": false,
+      "command": "uvx",
+      "args": ["alpaca-mcp-server"],
+      "env": {
+        "ALPACA_API_KEY": "${ALPACA_API_KEY}",
+        "ALPACA_SECRET_KEY": "${ALPACA_SECRET_KEY}",
+        "ALPACA_PAPER_TRADE": "${ALPACA_PAPER_TRADE}",
+        "ALPACA_BASE_URL": "${ALPACA_BASE_URL}",
+        "ALPACA_TOOLSETS": "${ALPACA_TOOLSETS}"
+      }
+    }
+  }
+}
