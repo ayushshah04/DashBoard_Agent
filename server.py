@@ -19,7 +19,7 @@ from website_scan import scan_company_website
 
 load_dotenv(encoding="utf-8-sig")
 
-app = FastAPI(title="Jarvis Dashboard Agent")
+app = FastAPI(title="Jarvis Market Console")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 

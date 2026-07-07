@@ -1,4 +1,4 @@
-# Jarvis Dashboard Agent
+# Jarvis Market Console
 
 A Python FastAPI dashboard for a ChatGPT coding agent that connects to MCP servers.
 
@@ -11,6 +11,8 @@ The default model is `gpt-5.5`. OpenAI's docs recommend the Responses API for re
 - `mcp_server_example.py` - local sandboxed coding MCP server with file and Python execution tools.
 - `mcp_config.example.json` - MCP config for the local workspace server and optional Alpaca MCP server.
 - `static/index.html` - Jarvis-style dashboard UI.
+- `docs/PDD.md` - Product Design Document with user flows and product diagrams.
+- `docs/SDD.md` - Software Design Document with architecture, code, API, and sequence diagrams.
 
 ## Setup
 
