@@ -2,6 +2,7 @@
 mcp_config.json
 workspace/
 research_vault.db
+risk_settings.json
 __pycache__/
 *.pyc
 .venv/

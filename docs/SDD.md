@@ -91,6 +91,7 @@ async def index() -> FileResponse:
 | `/` | GET | Serve dashboard HTML |
 | `/health` | GET | Basic server health and model |
 | `/api/trading/config` | GET | Return trading mode, risk limits, market universe, video feeds |
+| `/api/risk/settings` | POST | Save local dashboard risk overrides |
 | `/api/trading/prompts` | GET | Return preset automation prompts |
 | `/api/mcp/registry` | GET | Connect agent temporarily and list MCP servers/tools |
 | `/api/alpaca/account` | GET | Return account funds from Alpaca |
@@ -141,6 +142,12 @@ Market Pulse and Watchlist data are based on Alpaca REST snapshots when Alpaca k
 - `youtu.be/...`
 
 into iframe-friendly embed URLs.
+
+### 5.6 Risk Settings
+
+`trading_status()` returns risk limits from `current_risk_settings()`. Environment values remain the defaults, and saved dashboard overrides are read from `risk_settings.json` or the path set by `RISK_SETTINGS_PATH`.
+
+`POST /api/risk/settings` accepts `max_order_notional_usd`, `max_position_usd`, `max_daily_loss_usd`, and `options_max_contracts`. The backend clamps each value to configured min/max bounds, writes the normalized settings to `risk_settings.json`, and returns `risk_source=dashboard` so the UI can show that local overrides are active.
 
 ## 6. Agent Design: `agent.py`
 
@@ -497,6 +504,8 @@ The frontend keeps `latestAgentResult`, which is updated from `assistant_text` a
 `submitAgentPrompt()` centralizes prompt submission for the normal form and the trade buttons. It uses `agentBusy` to prevent overlapping runs.
 
 The Trade Board stores recent records in browser `localStorage` under `jarvis-trade-records-v1`. `makeTradeRecord()` adds a row immediately when the user requests a ticket, paper execution, or scout cycle. Agent prompts request a final `TRADE_RECORD` block with `status`, `symbol`, `asset_class`, `direction`, `entry`, `exit_target`, `stop`, `quantity_or_notional`, `order_id`, and `reason`; `updatePendingTradeRecord()` parses that block and updates the row.
+
+The Risk Management inputs call `saveRiskSettings()`, which posts the current limits to `/api/risk/settings`, reloads `/api/trading/config`, updates the visible `Risk` cockpit text, and feeds the same risk settings into later trade action prompts.
 
 Live trading remains guarded by `agent.py`; the frontend prompts also tell the agent not to auto-execute live orders from the continuous scout.
 

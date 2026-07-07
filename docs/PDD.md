@@ -131,6 +131,8 @@ The Trade Action Center sits under the market/risk cockpit. It captures the late
 
 The Trade Board records recent tickets and execution requests directly on the dashboard. It shows symbol, status, entry, exit/target, stop, size, and last update time.
 
+The Risk Management strip lets the user adjust order notional, max position size, daily loss limit, and options contract count without editing `.env`. Saved dashboard overrides update the visible Risk line and are included in future trade-ticket and paper-execution prompts.
+
 The continuous scout is designed for paper automation. If the system is in live mode, it returns a trade ticket instead of silently placing live orders.
 
 ### 7.6 Tools Panel

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import os
 import asyncio
+import json
 import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -94,6 +96,103 @@ def alpaca_headers() -> dict[str, str]:
 
 def account_currency_fallback() -> str:
     return os.getenv("ACCOUNT_CURRENCY", "USD").strip().upper() or "USD"
+
+
+RISK_LIMITS: dict[str, dict[str, object]] = {
+    "max_order_notional_usd": {
+        "env": "MAX_ORDER_NOTIONAL_USD",
+        "default": "50",
+        "minimum": 1,
+        "maximum": 1_000_000,
+        "integer": False,
+    },
+    "max_position_usd": {
+        "env": "MAX_POSITION_USD",
+        "default": "100",
+        "minimum": 1,
+        "maximum": 5_000_000,
+        "integer": False,
+    },
+    "max_daily_loss_usd": {
+        "env": "MAX_DAILY_LOSS_USD",
+        "default": "250",
+        "minimum": 1,
+        "maximum": 1_000_000,
+        "integer": False,
+    },
+    "options_max_contracts": {
+        "env": "OPTIONS_MAX_CONTRACTS",
+        "default": "1",
+        "minimum": 0,
+        "maximum": 100,
+        "integer": True,
+    },
+}
+
+
+def risk_settings_path() -> Path:
+    configured = os.getenv("RISK_SETTINGS_PATH", "risk_settings.json")
+    path = Path(configured)
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parent / path
+    return path
+
+
+def format_risk_value(value: float, integer: bool = False) -> str:
+    if integer:
+        return str(int(round(value)))
+    if value.is_integer():
+        return str(int(value))
+    return f"{value:.2f}".rstrip("0").rstrip(".")
+
+
+def env_risk_settings() -> dict[str, str]:
+    values: dict[str, str] = {}
+    for key, meta in RISK_LIMITS.items():
+        env_name = str(meta["env"])
+        values[key] = os.getenv(env_name, str(meta["default"]))
+    return values
+
+
+def read_risk_overrides() -> dict[str, object]:
+    path = risk_settings_path()
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def normalize_risk_settings(payload: dict[str, object], base: dict[str, str] | None = None) -> dict[str, str]:
+    base_values = base or env_risk_settings()
+    normalized: dict[str, str] = {}
+    for key, meta in RISK_LIMITS.items():
+        raw_value = payload.get(key, base_values.get(key, str(meta["default"])))
+        if raw_value is None or raw_value == "":
+            raw_value = base_values.get(key, str(meta["default"]))
+        try:
+            number = float(str(raw_value).replace(",", ""))
+        except ValueError as exc:
+            raise ValueError(f"{key} must be a number.") from exc
+        minimum = float(meta["minimum"])
+        maximum = float(meta["maximum"])
+        number = max(minimum, min(maximum, number))
+        normalized[key] = format_risk_value(number, bool(meta["integer"]))
+    return normalized
+
+
+def current_risk_settings() -> dict[str, str]:
+    return normalize_risk_settings(read_risk_overrides(), env_risk_settings())
+
+
+def save_risk_settings(payload: dict[str, object]) -> dict[str, str]:
+    settings = normalize_risk_settings(payload, current_risk_settings())
+    path = risk_settings_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    return settings
 
 
 POSITIVE_NEWS_TERMS = {
@@ -521,6 +620,7 @@ def trading_status() -> dict[str, object]:
         and os.getenv("LIVE_TRADING_CONFIRMATION") == "I_UNDERSTAND_LIVE_TRADING_RISK"
     )
     video_feeds = news_video_feeds()
+    risk_settings = current_risk_settings()
     return {
         "paper": paper,
         "mode": "paper" if paper else "live",
@@ -539,12 +639,8 @@ def trading_status() -> dict[str, object]:
         },
         "toolsets": [item.strip() for item in os.getenv("ALPACA_TOOLSETS", "").split(",") if item.strip()],
         "markets": [item.strip() for item in os.getenv("MARKET_UNIVERSE", "equities,crypto,currency").split(",") if item.strip()],
-        "risk": {
-            "max_position_usd": os.getenv("MAX_POSITION_USD", "100"),
-            "max_daily_loss_usd": os.getenv("MAX_DAILY_LOSS_USD", "250"),
-            "max_order_notional_usd": os.getenv("MAX_ORDER_NOTIONAL_USD", "50"),
-            "options_max_contracts": os.getenv("OPTIONS_MAX_CONTRACTS", "1"),
-        },
+        "risk": risk_settings,
+        "risk_source": "dashboard" if read_risk_overrides() else "environment",
         "news": {
             "video_url": video_feeds[0]["embed_url"] if video_feeds else "",
             "video_urls": video_feeds,
@@ -578,6 +674,15 @@ async def health() -> dict[str, str]:
 @app.get("/api/trading/config")
 async def trading_config() -> dict[str, object]:
     return trading_status()
+
+
+@app.post("/api/risk/settings")
+async def update_risk_settings(payload: dict[str, object] = Body(...)) -> dict[str, object]:
+    try:
+        settings = await asyncio.to_thread(save_risk_settings, payload)
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc), "risk": current_risk_settings()}
+    return {"status": "saved", "risk": settings, "risk_source": "dashboard"}
 
 
 @app.get("/api/trading/prompts")

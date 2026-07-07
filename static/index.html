@@ -174,7 +174,7 @@
     }
     main {
       display: grid;
-      grid-template-rows: auto auto auto auto auto auto auto 1fr auto;
+      grid-template-rows: auto auto auto auto auto auto auto auto 1fr auto;
       min-width: 0;
       overflow: hidden;
     }
@@ -234,6 +234,45 @@
       overflow-wrap: anywhere;
       color: var(--text);
       font-size: 13px;
+    }
+    .risk-management {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) repeat(4, minmax(88px, 0.8fr)) auto;
+      gap: 8px;
+      align-items: end;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(7, 16, 20, 0.52);
+    }
+    .risk-copy {
+      min-width: 0;
+      align-self: center;
+    }
+    .risk-copy span,
+    .risk-field span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 3px;
+    }
+    .risk-copy strong {
+      display: block;
+      color: var(--cyan);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .risk-field input {
+      min-height: 34px;
+      padding: 7px 8px;
+      font-size: 12px;
+    }
+    .risk-management button {
+      min-height: 34px;
+      padding: 6px 10px;
+      font-size: 11px;
+      white-space: nowrap;
     }
     .trade-actions {
       display: grid;
@@ -798,6 +837,8 @@
       .mover-grid { grid-template-columns: 1fr; }
       .mover-row { grid-template-columns: 1.2fr 0.8fr 0.8fr; }
       .mover-meta { text-align: left; }
+      .risk-management { grid-template-columns: 1fr 1fr; }
+      .risk-copy { grid-column: 1 / -1; }
       .trade-actions { grid-template-columns: 1fr; }
       .trade-action-buttons { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .trade-action-buttons button { white-space: normal; }
@@ -888,6 +929,29 @@
         <div class="control"><span>Risk</span><strong id="risk">Loading</strong></div>
         <div class="control"><span>Order Tools</span><strong id="orderTools">Loading</strong></div>
         <div class="control"><span>Robinhood MCP</span><strong id="robinhoodStatus">Disabled</strong></div>
+      </div>
+      <div class="risk-management">
+        <div class="risk-copy">
+          <span>Risk Management</span>
+          <strong id="riskSource">Environment defaults</strong>
+        </div>
+        <label class="risk-field">
+          <span>Order $</span>
+          <input id="riskOrderInput" type="number" min="1" max="1000000" step="1">
+        </label>
+        <label class="risk-field">
+          <span>Position $</span>
+          <input id="riskPositionInput" type="number" min="1" max="5000000" step="1">
+        </label>
+        <label class="risk-field">
+          <span>Daily Loss $</span>
+          <input id="riskLossInput" type="number" min="1" max="1000000" step="1">
+        </label>
+        <label class="risk-field">
+          <span>Options</span>
+          <input id="riskOptionsInput" type="number" min="0" max="100" step="1">
+        </label>
+        <button id="saveRiskSettings" type="button">Save Risk</button>
       </div>
       <div class="trade-actions">
         <div class="trade-action-copy">
@@ -1055,6 +1119,12 @@
     const risk = document.querySelector("#risk");
     const orderTools = document.querySelector("#orderTools");
     const robinhoodStatus = document.querySelector("#robinhoodStatus");
+    const riskSource = document.querySelector("#riskSource");
+    const riskOrderInput = document.querySelector("#riskOrderInput");
+    const riskPositionInput = document.querySelector("#riskPositionInput");
+    const riskLossInput = document.querySelector("#riskLossInput");
+    const riskOptionsInput = document.querySelector("#riskOptionsInput");
+    const saveRiskSettingsButton = document.querySelector("#saveRiskSettings");
     const tradeActionStatus = document.querySelector("#tradeActionStatus");
     const buildTradeTicket = document.querySelector("#buildTradeTicket");
     const executePaperTrade = document.querySelector("#executePaperTrade");
@@ -1677,6 +1747,51 @@
       return `${formatMarketNumber(number, 2)}x`;
     }
 
+    function riskSummaryText(riskConfig = {}) {
+      return `Order $${riskConfig.max_order_notional_usd || "50"} | Position $${riskConfig.max_position_usd || "100"} | Daily loss $${riskConfig.max_daily_loss_usd || "250"}`;
+    }
+
+    function fillRiskControls(riskConfig = {}, source = "environment") {
+      riskOrderInput.value = riskConfig.max_order_notional_usd || "50";
+      riskPositionInput.value = riskConfig.max_position_usd || "100";
+      riskLossInput.value = riskConfig.max_daily_loss_usd || "250";
+      riskOptionsInput.value = riskConfig.options_max_contracts || "1";
+      riskSource.textContent = source === "dashboard"
+        ? "Dashboard risk overrides active"
+        : "Environment defaults";
+    }
+
+    function riskPayloadFromControls() {
+      return {
+        max_order_notional_usd: riskOrderInput.value,
+        max_position_usd: riskPositionInput.value,
+        max_daily_loss_usd: riskLossInput.value,
+        options_max_contracts: riskOptionsInput.value,
+      };
+    }
+
+    async function saveRiskSettings() {
+      saveRiskSettingsButton.disabled = true;
+      try {
+        const data = await fetch("/api/risk/settings", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(riskPayloadFromControls()),
+        }).then((res) => res.json());
+        if (data.status !== "saved") {
+          addActivity(data.message || "Risk settings were not saved.");
+          fillRiskControls(data.risk || tradingConfigCache.risk || {}, data.risk_source || "environment");
+          return;
+        }
+        addActivity("Risk settings saved for dashboard prompts.", true);
+        await loadTradingCockpit();
+      } catch (error) {
+        addActivity(`Risk settings save failed: ${error.message}`);
+      } finally {
+        saveRiskSettingsButton.disabled = false;
+      }
+    }
+
     function formatMarketTime(value) {
       if (!value) return "LAST | --";
       const date = new Date(value);
@@ -1891,7 +2006,8 @@
       tradeMode.textContent = config.paper ? "Paper-safe" : (config.live_trading_enabled ? "Live unlocked" : "Live locked");
       accountCurrency.textContent = config.currency || "USD";
       markets.textContent = config.markets.join(", ");
-      risk.textContent = `Order $${config.risk.max_order_notional_usd} | Position $${config.risk.max_position_usd} | Daily loss $${config.risk.max_daily_loss_usd}`;
+      risk.textContent = riskSummaryText(config.risk);
+      fillRiskControls(config.risk || {}, config.risk_source || "environment");
       orderTools.textContent = config.order_tools_locked ? "Locked" : "Available";
       if (config.robinhood?.trading_enabled) {
         robinhoodStatus.textContent = "Trading unlocked";
@@ -2554,6 +2670,15 @@ END_TRADE_RECORD`;
     });
     watchNews.addEventListener("click", openWatchedNews);
     watchOptions.addEventListener("click", prepareOptionsOverview);
+    saveRiskSettingsButton.addEventListener("click", saveRiskSettings);
+    [riskOrderInput, riskPositionInput, riskLossInput, riskOptionsInput].forEach((input) => {
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          saveRiskSettings();
+        }
+      });
+    });
     buildTradeTicket.addEventListener("click", requestTradeTicket);
     executePaperTrade.addEventListener("click", requestPaperExecution);
     continuousScout.addEventListener("click", toggleContinuousScout);

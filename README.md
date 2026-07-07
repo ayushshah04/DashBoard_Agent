@@ -98,6 +98,8 @@ The dashboard shows current Alpaca funds from `/v2/account`: cash, buying power,
 
 The dashboard exposes live/paper status, risk limits, market scope, a news-factor screen, and an optional `NEWS_VIDEO_URL` iframe. Use only legal embeddable video URLs from your news provider.
 
+Risk Management is editable directly on the dashboard. Change the Order, Position, Daily Loss, or Options limits and press `Save Risk`; the backend stores those local overrides in ignored `risk_settings.json` so they survive server restarts without being pushed to GitHub.
+
 The Trade Action Center captures the latest agent research result and lets you:
 
 - Build an execution-ready trade ticket.
