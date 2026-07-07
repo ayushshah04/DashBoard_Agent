@@ -9,7 +9,7 @@ The default model is `gpt-5.5`. OpenAI's docs recommend the Responses API for re
 - `server.py` - FastAPI backend with a WebSocket agent stream.
 - `agent.py` - OpenAI Responses API + MCP orchestration loop.
 - `mcp_server_example.py` - local sandboxed coding MCP server with file and Python execution tools.
-- `mcp_config.example.json` - MCP config for the local workspace server and optional Alpaca MCP server.
+- `mcp_config.example.json` - MCP config for the local workspace, Newsdata, optional Alpaca, and optional Robinhood MCP servers.
 - `static/index.html` - Jarvis-style dashboard UI.
 - `docs/PDD.md` - Product Design Document with user flows and product diagrams.
 - `docs/SDD.md` - Software Design Document with architecture, code, API, and sequence diagrams.
@@ -133,7 +133,7 @@ NEWSDATA_COUNTRY=us
 NEWSDATA_CATEGORY=business
 ```
 
-The app calls Newsdata.io's `latest` endpoint for recent market headlines. You can also enable the optional `newsdata` MCP server in `mcp_config.json`; it runs with `uvx newsdata-mcp` and exposes read-only latest, market, crypto, source, and count tools.
+The app calls Newsdata.io's `latest` endpoint for recent market headlines. The `newsdata` MCP server now runs locally through `newsdata_mcp_server.py`, exposing sanitized read-only tools: `get_latest_news`, `get_market_news`, and `get_crypto_news`. This avoids 422 errors from invalid category, country, language, or size parameters before requests reach Newsdata.io.
 
 ## Robinhood MCP
 

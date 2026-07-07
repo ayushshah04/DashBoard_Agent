@@ -21,9 +21,9 @@
       }
     },
     "newsdata": {
-      "enabled": false,
-      "command": "uvx",
-      "args": ["newsdata-mcp"],
+      "enabled": true,
+      "command": "python",
+      "args": ["newsdata_mcp_server.py"],
       "env": {
         "NEWSDATA_API_KEY": "${NEWSDATA_API_KEY}",
         "NEWSDATA_BASE_URL": "${NEWSDATA_BASE_URL}"

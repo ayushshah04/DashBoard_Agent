@@ -158,6 +158,7 @@ The News tab shows:
 - News Factor Screen.
 - Alpaca News Impact.
 - Newsdata.io Feed.
+- Newsdata MCP tools with sanitized latest, market, and crypto headline calls.
 
 The News Factor Screen groups headlines by themes:
 

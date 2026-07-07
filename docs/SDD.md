@@ -63,6 +63,7 @@ flowchart TB
 | FastAPI backend | `server.py` | Serves UI, REST APIs, WebSocket agent stream |
 | Agent orchestrator | `agent.py` | Connects MCP servers, registers tools, calls OpenAI, runs tool loop |
 | Workspace MCP server | `mcp_server_example.py` | Sandboxed coding tools plus research/scanner tools |
+| Newsdata MCP server | `newsdata_mcp_server.py` | Local sanitized wrapper for Newsdata.io latest, market, and crypto headlines |
 | Research Vault | `research_vault.py` | SQLite schema and note CRUD/search/summarization |
 | Website Scanner | `website_scan.py` | HTML parser and company/investor link classifier |
 | Frontend dashboard | `static/index.html` | UI layout, panels, fetch calls, WebSocket rendering |
@@ -284,11 +285,21 @@ Path escapes the configured workspace.
 | `search_research_notes` | Search Research Vault notes |
 | `summarize_research_ticker` | Summarize notes for a ticker |
 
-## 8. Research Vault Design: `research_vault.py`
+## 8. Newsdata MCP Server: `newsdata_mcp_server.py`
+
+The local Newsdata MCP server keeps the public tool name `newsdata__get_latest_news` while avoiding the third-party package that returned HTTP 422 for invalid parameters. It sanitizes query, language, country, category, and size inputs before calling Newsdata.io.
+
+| Tool | Purpose |
+| --- | --- |
+| `get_latest_news` | Fetch latest headlines with validated parameters |
+| `get_market_news` | Fetch recent business-market headlines |
+| `get_crypto_news` | Fetch recent crypto-related headlines |
+
+## 9. Research Vault Design: `research_vault.py`
 
 Research Vault is a local SQLite-backed note store.
 
-### 8.1 Database Table
+### 9.1 Database Table
 
 ```mermaid
 erDiagram
@@ -310,7 +321,7 @@ erDiagram
 
 `tickers` and `tags` are stored as JSON arrays inside text fields.
 
-### 8.2 Note Types
+### 9.2 Note Types
 
 Allowed note types:
 
@@ -330,7 +341,7 @@ Allowed sentiments:
 - `bearish`
 - `watch`
 
-### 8.3 Main Functions
+### 9.3 Main Functions
 
 | Function | Purpose |
 | --- | --- |
@@ -341,11 +352,11 @@ Allowed sentiments:
 | `summarize_ticker()` | Aggregates notes for one ticker |
 | `export_notes_json()` | Returns search result JSON for MCP |
 
-## 9. Website Scanner Design: `website_scan.py`
+## 10. Website Scanner Design: `website_scan.py`
 
 `website_scan.py` is a lightweight HTML scanner for long-term company research.
 
-### 9.1 Parser
+### 10.1 Parser
 
 `CompanyPageParser` extends Python's `HTMLParser` and extracts:
 
@@ -362,7 +373,7 @@ It skips:
 - `noscript`
 - `svg`
 
-### 9.2 Link Classification
+### 10.2 Link Classification
 
 `classify_links()` sorts links into buckets:
 
@@ -383,7 +394,7 @@ It skips:
 
 SEC form detection uses `SEC_FORM_RE` so random URL text does not accidentally match `8-k` or `10-q` inside unrelated words.
 
-### 9.3 Scanner Flow
+### 10.3 Scanner Flow
 
 ```mermaid
 sequenceDiagram
@@ -405,7 +416,7 @@ sequenceDiagram
     API-->>UI: JSON result
 ```
 
-### 9.4 Output Shape
+### 10.4 Output Shape
 
 The scan returns:
 
@@ -425,7 +436,7 @@ The scan returns:
 }
 ```
 
-## 10. Frontend Design: `static/index.html`
+## 11. Frontend Design: `static/index.html`
 
 The frontend is a single static HTML file containing:
 
@@ -435,7 +446,7 @@ The frontend is a single static HTML file containing:
 
 It does not require a frontend build system.
 
-### 10.1 Major UI Sections
+### 11.1 Major UI Sections
 
 | UI Area | Purpose |
 | --- | --- |
@@ -448,7 +459,7 @@ It does not require a frontend build system.
 | Chat feed | User prompts, assistant messages, tool events |
 | Right tabs | Tools, Activity, News, Research, Vault, Video |
 
-### 10.2 Frontend Data Loading
+### 11.2 Frontend Data Loading
 
 On page load, the JavaScript calls:
 
@@ -472,7 +483,7 @@ Several calls repeat on intervals:
 
 The Trade Action Center also has an optional continuous scout interval. When enabled, it submits one scout cycle immediately and then every five minutes. If an agent run is still busy when the next cycle fires, that cycle is skipped instead of stacking concurrent WebSocket requests.
 
-### 10.3 WebSocket Rendering
+### 11.3 WebSocket Rendering
 
 The browser opens:
 
@@ -493,7 +504,7 @@ Then it handles message types:
 | `error` | Set status to error |
 | `done` | Set final status |
 
-### 10.4 Trade Action Center Logic
+### 11.4 Trade Action Center Logic
 
 The frontend keeps `latestAgentResult`, which is updated from `assistant_text` and `tool_result` WebSocket messages. The three trade action buttons use that context, or fall back to live market/watchlist context when no prior result is available:
 
@@ -511,7 +522,7 @@ The Risk Management inputs call `saveRiskSettings()`, which posts the current li
 
 Live trading remains guarded by `agent.py`; the frontend prompts also tell the agent not to auto-execute live orders from the continuous scout.
 
-## 11. End-to-End Agent Sequence
+## 12. End-to-End Agent Sequence
 
 ```mermaid
 sequenceDiagram
@@ -537,9 +548,9 @@ sequenceDiagram
     Agent-->>UI: assistant_text and done
 ```
 
-## 12. Configuration Design
+## 13. Configuration Design
 
-### 12.1 Environment Variables
+### 13.1 Environment Variables
 
 Important runtime variables:
 
@@ -561,7 +572,7 @@ Important runtime variables:
 
 Secrets should stay in `.env` and should not be committed.
 
-### 12.2 MCP Configuration
+### 13.2 MCP Configuration
 
 `mcp_config.json` defines MCP servers. A server can be:
 
@@ -571,15 +582,17 @@ Secrets should stay in `.env` and should not be committed.
 
 The example config is committed as `mcp_config.example.json`.
 
-## 13. Security and Safety Controls
+The committed example points `newsdata` at `newsdata_mcp_server.py` so the agent can call sanitized Newsdata tools locally.
 
-### 13.1 File System Safety
+## 14. Security and Safety Controls
+
+### 14.1 File System Safety
 
 The MCP workspace tools only operate inside `workspace/`.
 
 `safe_path()` rejects path traversal outside the configured workspace root.
 
-### 13.2 Trading Safety
+### 14.2 Trading Safety
 
 Risky live tool names are filtered in `agent.py`.
 
@@ -591,7 +604,7 @@ Live Alpaca trading requires:
 
 Robinhood trading requires its own exact confirmation phrase.
 
-### 13.3 Secret Handling
+### 14.3 Secret Handling
 
 Secrets are loaded from `.env` by `dotenv`.
 
@@ -602,7 +615,7 @@ The repo should not commit:
 - Newsdata keys.
 - Robinhood auth tokens.
 
-## 14. Deployment and Local Run Design
+## 15. Deployment and Local Run Design
 
 The app is designed for local development:
 
@@ -625,7 +638,7 @@ The live C-drive copy is usually located at:
 C:\DashBoard_Agent
 ```
 
-## 15. Known Limitations
+## 16. Known Limitations
 
 - Some company websites block simple HTTP scanners with 403 responses.
 - News sentiment is keyword-based and should not be treated as a trading signal by itself.
@@ -633,7 +646,7 @@ C:\DashBoard_Agent
 - Alpaca and Newsdata features depend on valid API keys and external service availability.
 - Robinhood MCP requires external desktop authentication before tools can be listed.
 
-## 16. Suggested Improvements
+## 17. Suggested Improvements
 
 - Split frontend JavaScript into modules.
 - Add tests for website scanner link classification.
