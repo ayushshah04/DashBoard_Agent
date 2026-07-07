@@ -366,6 +366,29 @@
       color: var(--muted);
       margin-top: 4px;
     }
+    .pill small.scan-link-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .scan-link-row a {
+      flex: 1 1 150px;
+      min-width: 0;
+    }
+    .scan-link-row button,
+    .scan-deep-pill button {
+      min-height: 28px;
+      padding: 4px 8px;
+      font-size: 10px;
+    }
+    .scan-deep-pill {
+      display: grid;
+      gap: 8px;
+    }
+    .scan-deep-pill button {
+      justify-self: start;
+    }
     .prompt-grid {
       display: grid;
       gap: 8px;
@@ -1829,6 +1852,66 @@
       return div;
     }
 
+    function addScanLinkSection(title, links, options = {}) {
+      if (!links || !links.length) return;
+      const div = document.createElement("div");
+      div.className = `pill ${options.hot ? "hot" : ""}`;
+      const label = document.createElement("strong");
+      label.textContent = title;
+      div.appendChild(label);
+      links.slice(0, options.limit || 6).forEach((link) => {
+        const row = document.createElement("small");
+        row.className = "scan-link-row";
+        const anchor = document.createElement("a");
+        anchor.href = link.href || "#";
+        anchor.target = "_blank";
+        anchor.rel = "noreferrer";
+        anchor.textContent = link.title || link.text || link.href;
+        row.appendChild(anchor);
+        if (link.group) {
+          const group = document.createElement("span");
+          group.textContent = ` | ${link.group.replaceAll("_", " ")}`;
+          row.appendChild(group);
+        }
+        if (options.research) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Deep Research";
+          button.title = "Prepare deeper report research prompt";
+          button.addEventListener("click", () => {
+            promptBox.value = link.research_prompt || `Review this investor financial report for deeper due diligence: ${link.href}`;
+            promptBox.focus();
+            addActivity(`Prepared report research for ${link.title || link.text || link.href}`, true);
+          });
+          row.appendChild(button);
+        }
+        div.appendChild(row);
+      });
+      companyScanResults.appendChild(div);
+    }
+
+    function prepareCompanyFinancialPrompt(data) {
+      const reports = (data.financial_report_links || [])
+        .slice(0, 8)
+        .map((link) => `- ${link.title} (${link.group}): ${link.href}`)
+        .join("\n");
+      const investorPages = (data.investor_pages_scanned || [])
+        .slice(0, 4)
+        .map((link) => `- ${link.title}: ${link.href}`)
+        .join("\n");
+      promptBox.value = `Build a deeper financial-report research report for this company website: ${data.url}
+
+Investor pages scanned:
+${investorPages || "- None found from the homepage"}
+
+Financial reports, filings, earnings, and presentations found:
+${reports || "- None found from the homepage or investor pages"}
+
+Use these links plus Alpaca market data, Alpaca news, Newsdata.io, the Research Vault, and options risk context. Extract revenue drivers, gross/operating margin signals, cash flow, balance-sheet risk, guidance, management commentary, catalysts, downside risks, and a watch/buy/avoid view. Do not place orders.`;
+      promptBox.focus();
+      addActivity("Prepared deeper company financial-report research", true);
+    }
+
     async function scanCompanyWebsite() {
       const url = companyUrl.value.trim();
       companyScanResults.innerHTML = "";
@@ -1849,7 +1932,27 @@
         if (data.headings && data.headings.length) {
           addScanPill(`Signals: ${data.headings.slice(0, 6).join(" | ")}`);
         }
+        if (data.investor_pages_scanned && data.investor_pages_scanned.length) {
+          addScanLinkSection("Investor pages scanned", data.investor_pages_scanned, { hot: true, limit: 4 });
+        }
+        if (data.investor_headings && data.investor_headings.length) {
+          addScanPill(`Investor signals: ${data.investor_headings.slice(0, 8).join(" | ")}`, true);
+        }
+        addScanLinkSection("Financial reports, filings, earnings and presentations", data.financial_report_links || [], {
+          hot: true,
+          limit: 10,
+          research: true,
+        });
+        const deepButton = document.createElement("button");
+        deepButton.type = "button";
+        deepButton.className = "scan-prompt-button";
+        deepButton.textContent = "Try Deeper Research";
+        deepButton.addEventListener("click", () => prepareCompanyFinancialPrompt(data));
+        const deepPill = addScanPill("Use scanned investor pages and financial-report links for deeper due diligence.", true);
+        deepPill.classList.add("scan-deep-pill");
+        deepPill.appendChild(deepButton);
         Object.entries(data.link_map || {}).slice(0, 8).forEach(([group, links]) => {
+          if (["financial_reports", "sec_filings", "earnings", "presentations"].includes(group)) return;
           const div = document.createElement("div");
           div.className = "pill";
           const label = document.createElement("strong");
@@ -1857,12 +1960,17 @@
           div.appendChild(label);
           links.slice(0, 3).forEach((link) => {
             const small = document.createElement("small");
-            small.textContent = `${link.text} - ${link.href}`;
+            const anchor = document.createElement("a");
+            anchor.href = link.href;
+            anchor.target = "_blank";
+            anchor.rel = "noreferrer";
+            anchor.textContent = link.text;
+            small.appendChild(anchor);
             div.appendChild(small);
           });
           companyScanResults.appendChild(div);
         });
-        promptBox.value = `Use the company website scan for ${data.url}, then build a long-term investment research report. Include business quality, moat, growth drivers, risks, valuation context, Newsdata.io headlines, Alpaca market data, and options risk context. Do not place orders.`;
+        prepareCompanyFinancialPrompt(data);
       } catch (error) {
         companyScanResults.innerHTML = "";
         addScanPill(`Website scan failed: ${error.message}`);

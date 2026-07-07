@@ -75,9 +75,35 @@ def normalize_url(url: str) -> str:
     return parsed.geturl()
 
 
+SEC_FORM_RE = re.compile(r"(?<![a-z0-9])(?:10-k|10-q|8-k|20-f|6-k|def\s*14a|s-1)(?![a-z0-9])")
+
+
+def matches_link_terms(label: str, terms: tuple[str, ...]) -> bool:
+    for term in terms:
+        if term == "__sec_form__":
+            if SEC_FORM_RE.search(label):
+                return True
+        elif term in label:
+            return True
+    return False
+
+
 def classify_links(links: list[dict[str, str]]) -> dict[str, list[dict[str, str]]]:
     buckets = {
-        "investor_relations": ("investor", "ir.", "sec filing", "annual report"),
+        "investor_relations": ("investor", "investors", "ir.", "/ir", "shareholder"),
+        "financial_reports": (
+            "annual report",
+            "quarterly report",
+            "financial report",
+            "financial results",
+            "__sec_form__",
+            "form 10",
+            "report.pdf",
+            "annualreports",
+        ),
+        "sec_filings": ("sec filing", "sec.gov", "edgar", "__sec_form__", "proxy"),
+        "earnings": ("earnings", "quarterly results", "results", "press release", "webcast", "conference call"),
+        "presentations": ("presentation", "investor day", "deck", "slides"),
         "products": ("product", "platform", "solution", "service"),
         "pricing": ("pricing", "plans"),
         "customers": ("customer", "case stud", "story"),
@@ -97,10 +123,46 @@ def classify_links(links: list[dict[str, str]]) -> dict[str, list[dict[str, str]
             continue
         seen.add(key)
         for bucket, terms in buckets.items():
-            if any(term in label for term in terms):
+            if matches_link_terms(label, terms):
                 classified[bucket].append(link)
                 break
     return {key: value[:8] for key, value in classified.items() if value}
+
+
+def merge_links(*groups: list[dict[str, str]]) -> list[dict[str, str]]:
+    merged: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for links in groups:
+        for link in links:
+            href = link.get("href", "")
+            if href and href not in seen:
+                seen.add(href)
+                merged.append(link)
+    return merged
+
+
+def likely_investor_page(link: dict[str, str]) -> bool:
+    label = f"{link.get('text', '')} {link.get('href', '')}".lower()
+    terms = ("investor", "investors", "ir.", "/ir", "financial", "reports", "earnings", "sec filing")
+    return any(term in label for term in terms)
+
+
+def financial_report_targets(link_map: dict[str, list[dict[str, str]]]) -> list[dict[str, str]]:
+    targets: list[dict[str, str]] = []
+    for group in ("financial_reports", "sec_filings", "earnings", "presentations"):
+        for link in link_map.get(group, []):
+            targets.append(
+                {
+                    "group": group,
+                    "title": link["text"],
+                    "href": link["href"],
+                    "research_prompt": (
+                        f"Review this {group.replace('_', ' ')} link for financial-report due diligence: "
+                        f"{link['href']}. Extract revenue, margin, cash flow, guidance, risks, and management commentary."
+                    ),
+                }
+            )
+    return targets[:12]
 
 
 def scan_company_website(url: str, max_chars: int = 6000, timeout_seconds: int = 15) -> dict[str, Any]:
@@ -120,18 +182,58 @@ def scan_company_website(url: str, max_chars: int = 6000, timeout_seconds: int =
     parser = CompanyPageParser(str(response.url))
     parser.feed(response.text[:250_000])
     body_text = clean_text(" ".join(parser.text_parts))[:max(1000, min(max_chars, 20_000))]
+    homepage_links = parser.links
+    homepage_map = classify_links(homepage_links)
+
+    investor_pages_scanned: list[dict[str, str]] = []
+    investor_links: list[dict[str, str]] = []
+    investor_headings: list[str] = []
+    investor_text_parts: list[str] = []
+
+    candidates = merge_links(
+        homepage_map.get("investor_relations", []),
+        homepage_map.get("financial_reports", []),
+        homepage_map.get("sec_filings", []),
+        [link for link in homepage_links if likely_investor_page(link)],
+    )[:4]
+    with httpx.Client(follow_redirects=True, timeout=timeout_seconds, headers=headers) as client:
+        for link in candidates:
+            href = link["href"]
+            try:
+                page = client.get(href)
+                page.raise_for_status()
+            except httpx.HTTPError:
+                continue
+            page_type = page.headers.get("content-type", "")
+            if "html" not in page_type:
+                continue
+            page_parser = CompanyPageParser(str(page.url))
+            page_parser.feed(page.text[:250_000])
+            investor_pages_scanned.append({"title": link["text"], "href": str(page.url)})
+            investor_links.extend(page_parser.links)
+            investor_headings.extend(page_parser.headings[:8])
+            investor_text_parts.extend(page_parser.text_parts[:80])
+
+    all_links = merge_links(homepage_links, investor_links)
+    link_map = classify_links(all_links)
+    investor_text_sample = clean_text(" ".join(investor_text_parts))[:3000]
 
     return {
         "url": str(response.url),
         "title": parser.title[:240],
         "description": parser.description,
         "headings": parser.headings[:24],
-        "link_map": classify_links(parser.links),
+        "investor_headings": investor_headings[:24],
+        "link_map": link_map,
+        "investor_pages_scanned": investor_pages_scanned,
+        "financial_report_links": financial_report_targets(link_map),
         "text_sample": body_text,
+        "investor_text_sample": investor_text_sample,
         "research_notes": [
             "Use this as qualitative context, not as a buy/sell signal by itself.",
             "Cross-check company claims against filings, financial statements, news, and market data.",
             "For long-term investing, look for durable demand, margin quality, balance-sheet strength, and management credibility.",
+            "Use annual reports, 10-K/10-Q filings, earnings releases, and investor presentations for deeper financial due diligence.",
         ],
     }
 
