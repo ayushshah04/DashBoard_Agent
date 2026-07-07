@@ -39,7 +39,7 @@ Open `http://localhost:8000`.
 
 ## Enable Alpaca MCP
 
-Install `uv` / `uvx`, then edit `.env`:
+The project installs `uv`, which provides `uvx`. Edit `.env`:
 
 ```bash
 ALPACA_API_KEY=your_alpaca_api_key

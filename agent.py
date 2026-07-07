@@ -110,6 +110,7 @@ class OpenAIMCPAgent:
         self.servers: dict[str, MCPServerHandle] = {}
         self.tool_map: dict[str, tuple[str, str]] = {}
         self.openai_tools: list[dict[str, Any]] = []
+        self.connection_warnings: list[str] = []
 
     async def __aenter__(self) -> "OpenAIMCPAgent":
         await self.connect()
@@ -141,22 +142,27 @@ class OpenAIMCPAgent:
                 args=args,
                 env=_expanded_env(server_config.get("env")),
             )
-            read_stream, write_stream = await self.stack.enter_async_context(stdio_client(params))
-            session = await self.stack.enter_async_context(ClientSession(read_stream, write_stream))
-            await session.initialize()
-            self.servers[server_name] = MCPServerHandle(server_name, session)
+            try:
+                read_stream, write_stream = await self.stack.enter_async_context(stdio_client(params))
+                session = await self.stack.enter_async_context(ClientSession(read_stream, write_stream))
+                await session.initialize()
+                self.servers[server_name] = MCPServerHandle(server_name, session)
 
-            tools_result = await session.list_tools()
-            for tool in tools_result.tools:
-                openai_name = f"{server_name}__{tool.name}"
-                self.tool_map[openai_name] = (server_name, tool.name)
-                self.openai_tools.append(
-                    {
-                        "type": "function",
-                        "name": openai_name,
-                        "description": f"[{server_name}] {tool.description or ''}".strip(),
-                        "parameters": tool.inputSchema or {"type": "object", "properties": {}},
-                    }
+                tools_result = await session.list_tools()
+                for tool in tools_result.tools:
+                    openai_name = f"{server_name}__{tool.name}"
+                    self.tool_map[openai_name] = (server_name, tool.name)
+                    self.openai_tools.append(
+                        {
+                            "type": "function",
+                            "name": openai_name,
+                            "description": f"[{server_name}] {tool.description or ''}".strip(),
+                            "parameters": tool.inputSchema or {"type": "object", "properties": {}},
+                        }
+                    )
+            except Exception as exc:
+                self.connection_warnings.append(
+                    f"Skipped MCP server '{server_name}': {type(exc).__name__}: {exc}"
                 )
 
     async def call_tool(self, openai_tool_name: str, tool_input: dict[str, Any]) -> str:
@@ -172,6 +178,8 @@ class OpenAIMCPAgent:
             "servers": list(self.servers),
             "tools": [tool["name"] for tool in self.openai_tools],
         }
+        for warning in self.connection_warnings:
+            yield {"type": "warning", "message": warning}
 
         for turn in range(max_turns):
             yield {"type": "thinking", "message": f"ChatGPT turn {turn + 1}: planning next action"}

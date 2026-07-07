@@ -308,6 +308,9 @@
         } else if (msg.type === "thinking" || msg.type === "status") {
           statusEl.textContent = msg.message;
           addActivity(msg.message);
+        } else if (msg.type === "warning") {
+          addBubble(msg.message, "tool");
+          addActivity(msg.message);
         } else if (msg.type === "error" || msg.type === "tool_error") {
           statusEl.textContent = "Error";
           addBubble(msg.error, "tool");
