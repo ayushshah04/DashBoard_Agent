@@ -253,7 +253,7 @@
       padding: 10px;
       border-top: 1px solid var(--line);
     }
-    textarea, input {
+    textarea, input, select {
       width: 100%;
       min-height: 44px;
       resize: vertical;
@@ -291,7 +291,7 @@
     .dock-panel.active { display: flex; }
     .panel-tabs {
       display: grid;
-      grid-template-columns: repeat(5, 1fr);
+      grid-template-columns: repeat(6, 1fr);
       gap: 6px;
     }
     .panel-tabs button {
@@ -354,10 +354,31 @@
       min-height: 38px;
       font-size: 12px;
     }
+    .compact-form select {
+      min-height: 38px;
+      font-size: 12px;
+      padding: 8px 10px;
+    }
     .compact-form button {
       min-height: 38px;
       padding: 8px 10px;
       font-size: 12px;
+    }
+    .vault-fields {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 12px;
+    }
+    .vault-fields textarea {
+      grid-column: 1 / -1;
+      min-height: 92px;
+    }
+    .vault-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      padding: 0 12px 12px;
     }
     .prompt-grid button {
       min-height: 38px;
@@ -609,10 +630,12 @@
       .market-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .market-row { grid-template-columns: 1.2fr 1fr 1fr; }
       .market-trend, .market-time { grid-column: auto; text-align: left; }
+      .panel-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .mover-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .mover-grid { grid-template-columns: 1fr; }
       .mover-row { grid-template-columns: 1.2fr 0.8fr 0.8fr; }
       .mover-meta { text-align: left; }
+      .vault-fields { grid-template-columns: 1fr; }
       form { grid-template-columns: 1fr; }
       button { min-height: 46px; }
     }
@@ -712,6 +735,7 @@
         <button data-panel="panel-activity" type="button">Activity</button>
         <button data-panel="panel-news" type="button">News</button>
         <button data-panel="panel-research" type="button">Research</button>
+        <button data-panel="panel-vault" type="button">Vault</button>
         <button data-panel="panel-video" type="button">Video</button>
       </div>
       <section class="dock-panel active" id="panel-tools">
@@ -756,6 +780,49 @@
         </div>
         <h2>Automation Prompts</h2>
         <div class="prompt-grid" id="promptButtons"></div>
+      </section>
+      <section class="dock-panel" id="panel-vault">
+        <h2>Research Vault</h2>
+        <div class="vault-fields">
+          <input id="vaultTitle" type="text" placeholder="Title">
+          <input id="vaultTickers" type="text" placeholder="Tickers">
+          <select id="vaultType">
+            <option value="note">Note</option>
+            <option value="thesis">Thesis</option>
+            <option value="risk">Risk</option>
+            <option value="earnings">Earnings</option>
+            <option value="news">News</option>
+            <option value="options">Options</option>
+            <option value="macro">Macro</option>
+            <option value="meeting">Meeting</option>
+          </select>
+          <select id="vaultSentiment">
+            <option value="neutral">Neutral</option>
+            <option value="bullish">Bullish</option>
+            <option value="bearish">Bearish</option>
+            <option value="watch">Watch</option>
+          </select>
+          <input id="vaultConviction" type="number" min="1" max="5" value="3" placeholder="Conviction">
+          <input id="vaultHorizon" type="text" placeholder="Horizon">
+          <input id="vaultSource" type="url" placeholder="Source URL">
+          <input id="vaultTags" type="text" placeholder="Tags">
+          <textarea id="vaultBody" placeholder="Research note"></textarea>
+        </div>
+        <div class="vault-actions">
+          <button id="saveVaultNote" type="button">Save Note</button>
+          <button id="askVault" type="button">Ask Vault</button>
+        </div>
+        <h2>Search Vault</h2>
+        <div class="compact-form">
+          <input id="vaultSearch" type="text" placeholder="Search notes">
+          <button id="searchVault" type="button">Search</button>
+        </div>
+        <div class="compact-form">
+          <input id="vaultTickerFilter" type="text" placeholder="Ticker filter">
+          <button id="summarizeVault" type="button">Summary</button>
+        </div>
+        <div class="list" id="vaultSummary"></div>
+        <div class="list" id="vaultResults"></div>
       </section>
       <section class="dock-panel" id="panel-video">
         <h2>Live News Video</h2>
@@ -817,6 +884,23 @@
     const analyzeOptions = document.querySelector("#analyzeOptions");
     const optionsFactors = document.querySelector("#optionsFactors");
     const promptButtons = document.querySelector("#promptButtons");
+    const vaultTitle = document.querySelector("#vaultTitle");
+    const vaultTickers = document.querySelector("#vaultTickers");
+    const vaultType = document.querySelector("#vaultType");
+    const vaultSentiment = document.querySelector("#vaultSentiment");
+    const vaultConviction = document.querySelector("#vaultConviction");
+    const vaultHorizon = document.querySelector("#vaultHorizon");
+    const vaultSource = document.querySelector("#vaultSource");
+    const vaultTags = document.querySelector("#vaultTags");
+    const vaultBody = document.querySelector("#vaultBody");
+    const saveVaultNote = document.querySelector("#saveVaultNote");
+    const askVault = document.querySelector("#askVault");
+    const vaultSearch = document.querySelector("#vaultSearch");
+    const searchVault = document.querySelector("#searchVault");
+    const vaultTickerFilter = document.querySelector("#vaultTickerFilter");
+    const summarizeVault = document.querySelector("#summarizeVault");
+    const vaultSummary = document.querySelector("#vaultSummary");
+    const vaultResults = document.querySelector("#vaultResults");
     const videoSlot = document.querySelector("#videoSlot");
     const panelTabs = Array.from(document.querySelectorAll(".panel-tabs button"));
     const dockPanels = Array.from(document.querySelectorAll(".dock-panel"));
@@ -909,6 +993,8 @@
       selectedTicker = normalized;
       selectedTickerEl.textContent = selectedTicker;
       optionsTicker.value = selectedTicker;
+      vaultTickers.value = selectedTicker;
+      vaultTickerFilter.value = selectedTicker;
       promptBox.value = `Research ${selectedTicker} using Alpaca market data, Newsdata.io, Alpaca news, and options-data. Include price action, news catalysts, option-chain risk, and a watch/buy/avoid view. Do not place orders.`;
       renderOptionsPrompts();
       renderWatchlist();
@@ -1005,6 +1091,148 @@
       } catch (error) {
         addActivity(`Watchlist snapshots failed: ${error.message}`);
       }
+    }
+
+    function noteTickerText(note) {
+      return (note.tickers || []).join(", ") || "No ticker";
+    }
+
+    function noteMetaText(note) {
+      return [
+        note.note_type,
+        note.sentiment,
+        `conviction ${note.conviction}/5`,
+        note.horizon,
+        note.created_at,
+      ].filter(Boolean).join(" | ");
+    }
+
+    function renderVaultNotes(notes) {
+      vaultResults.innerHTML = "";
+      if (!notes || !notes.length) {
+        const empty = document.createElement("div");
+        empty.className = "pill warn";
+        empty.textContent = "No saved research matched.";
+        vaultResults.appendChild(empty);
+        return;
+      }
+      notes.forEach((note) => {
+        const div = document.createElement("div");
+        div.className = "pill hot";
+        const title = document.createElement("strong");
+        title.textContent = note.title;
+        const meta = document.createElement("small");
+        meta.textContent = `${noteTickerText(note)} | ${noteMetaText(note)}`;
+        const body = document.createElement("small");
+        body.textContent = note.body;
+        div.append(title, meta, body);
+        if (note.source_url) {
+          const link = document.createElement("a");
+          link.href = note.source_url;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.textContent = "Source";
+          div.appendChild(link);
+        }
+        const action = document.createElement("button");
+        action.type = "button";
+        action.textContent = "Use";
+        action.title = `Use note ${note.id}`;
+        action.addEventListener("click", () => {
+          const ticker = (note.tickers || [selectedTicker])[0] || selectedTicker;
+          setSelectedTicker(ticker);
+          promptBox.value = `Use this saved research note for ${ticker}: ${note.title}\n\n${note.body}\n\nCompare it with current Alpaca market data, Alpaca news, Newsdata.io, and my watchlist context. Do not place orders.`;
+          promptBox.focus();
+        });
+        div.appendChild(action);
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.textContent = "Delete";
+        remove.title = `Delete note ${note.id}`;
+        remove.addEventListener("click", () => deleteVaultNote(note.id));
+        div.appendChild(remove);
+        vaultResults.appendChild(div);
+      });
+    }
+
+    function renderVaultSummary(summary) {
+      vaultSummary.innerHTML = "";
+      const rows = [
+        `${summary.ticker}: ${summary.note_count} saved notes`,
+        `Average conviction: ${summary.average_conviction || "--"}`,
+        `Sentiment: ${Object.entries(summary.by_sentiment || {}).map(([key, value]) => `${key} ${value}`).join(", ") || "--"}`,
+        `Types: ${Object.entries(summary.by_type || {}).map(([key, value]) => `${key} ${value}`).join(", ") || "--"}`,
+      ];
+      rows.forEach((row, index) => {
+        const div = document.createElement("div");
+        div.className = `pill ${index === 0 ? "hot" : ""}`;
+        div.textContent = row;
+        vaultSummary.appendChild(div);
+      });
+    }
+
+    async function saveResearchVaultNote() {
+      const payload = {
+        title: vaultTitle.value.trim(),
+        body: vaultBody.value.trim(),
+        tickers: vaultTickers.value.trim() || selectedTicker,
+        note_type: vaultType.value,
+        sentiment: vaultSentiment.value,
+        conviction: Number(vaultConviction.value || 3),
+        horizon: vaultHorizon.value.trim(),
+        source_url: vaultSource.value.trim(),
+        tags: vaultTags.value.trim(),
+      };
+      try {
+        const data = await fetch("/api/research/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then((res) => res.json());
+        if (data.status !== "saved") {
+          addActivity(data.message || "Research note was not saved.");
+          return;
+        }
+        addActivity(`Saved research note ${data.note.id}`, true);
+        vaultTitle.value = "";
+        vaultBody.value = "";
+        vaultSource.value = "";
+        await searchResearchVault();
+        await summarizeResearchVault();
+      } catch (error) {
+        addActivity(`Research vault save failed: ${error.message}`);
+      }
+    }
+
+    async function searchResearchVault() {
+      const params = new URLSearchParams({
+        q: vaultSearch.value.trim(),
+        ticker: vaultTickerFilter.value.trim(),
+        limit: "25",
+      });
+      const data = await fetch(`/api/research/notes?${params}`).then((res) => res.json());
+      renderVaultNotes(data.notes || []);
+    }
+
+    async function summarizeResearchVault() {
+      const ticker = normalizeTicker(vaultTickerFilter.value || selectedTicker);
+      if (!ticker) return;
+      const data = await fetch(`/api/research/summary?ticker=${encodeURIComponent(ticker)}&limit=25`).then((res) => res.json());
+      renderVaultSummary(data);
+      renderVaultNotes(data.recent_notes || []);
+    }
+
+    async function deleteVaultNote(noteId) {
+      await fetch(`/api/research/notes/${noteId}`, { method: "DELETE" });
+      await searchResearchVault();
+      await summarizeResearchVault();
+    }
+
+    function askResearchVault() {
+      const ticker = normalizeTicker(vaultTickerFilter.value || vaultTickers.value || selectedTicker);
+      setPanel("panel-vault");
+      promptBox.value = `Use the Research Vault tools to search and summarize my saved research for ${ticker}. Then compare it with current Alpaca market snapshots, Alpaca news, Newsdata.io headlines, market movers, and options risk. Highlight thesis, risks, catalysts, conviction changes, and next research questions. Do not place orders.`;
+      promptBox.focus();
     }
 
     function setPanel(panelId) {
@@ -1672,12 +1900,27 @@
         prepareOptionsOverview();
       }
     });
+    saveVaultNote.addEventListener("click", saveResearchVaultNote);
+    searchVault.addEventListener("click", () => {
+      searchResearchVault().catch((error) => addActivity(`Research vault search failed: ${error.message}`));
+    });
+    summarizeVault.addEventListener("click", () => {
+      summarizeResearchVault().catch((error) => addActivity(`Research vault summary failed: ${error.message}`));
+    });
+    askVault.addEventListener("click", askResearchVault);
+    vaultSearch.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        searchResearchVault().catch((error) => addActivity(`Research vault search failed: ${error.message}`));
+      }
+    });
 
     promptBox.value = "Build a Python prime checker, save it as prime.py, and test it with 97.";
     loadStoredWatchlist();
     setSelectedTicker(selectedTicker);
     renderOptionsPrompts();
     loadWatchlistSnapshots();
+    summarizeResearchVault().catch((error) => addActivity(`Research vault summary failed: ${error.message}`));
     loadTradingCockpit().catch((error) => addActivity(`Trading cockpit failed: ${error.message}`));
     loadMcpRegistry();
     loadMarketOverview();

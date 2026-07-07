@@ -87,6 +87,7 @@ MAX_ORDER_NOTIONAL_USD=50
 MARKET_UNIVERSE=equities,crypto,currency
 ACCOUNT_CURRENCY=USD
 WATCHLIST_SYMBOLS=TSLA,NVDA,SPY
+RESEARCH_VAULT_DB=research_vault.db
 LONG_TERM_HORIZON=3-5 years
 OPTIONS_MAX_CONTRACTS=1
 ```
@@ -144,6 +145,8 @@ Robinhood notes that agentic trading can execute trades without direct input and
 ## Long-term research and options
 
 The dashboard includes a company website scanner and long-term investing prompts. Paste a company URL into the Company Website Scan panel to extract homepage signals, investor-relations links, product pages, pricing, careers, news, security, and leadership links.
+
+The Research Vault tab stores structured local notes in SQLite. Save notes with tickers, type, sentiment, conviction, horizon, source URL, and tags; then search or summarize by ticker. The workspace MCP server also exposes `add_research_note`, `search_research_notes`, and `summarize_research_ticker`, so the agent can use your saved research during analysis. The default `research_vault.db` file is ignored by git.
 
 Options are available through Alpaca's `options-data` toolset for research. Keep `OPTIONS_MAX_CONTRACTS=1` while testing. Options order tools remain subject to the same paper/live trading lock as stock and crypto orders.
 

@@ -7,11 +7,12 @@ from urllib.parse import parse_qs, urlparse
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from agent import OpenAIMCPAgent, DEFAULT_MODEL
+from research_vault import add_note, delete_note, search_notes, summarize_ticker
 from website_scan import scan_company_website
 
 
@@ -855,6 +856,49 @@ async def alpaca_news(
             for symbol, count in sorted(ticker_counts.items(), key=lambda item: item[1], reverse=True)
         ],
     }
+
+
+@app.post("/api/research/notes")
+async def create_research_note(payload: dict[str, object] = Body(...)) -> dict[str, object]:
+    try:
+        note = await asyncio.to_thread(
+            add_note,
+            title=str(payload.get("title") or ""),
+            body=str(payload.get("body") or ""),
+            tickers=payload.get("tickers") if isinstance(payload.get("tickers"), list) else str(payload.get("tickers") or ""),
+            note_type=str(payload.get("note_type") or "note"),
+            sentiment=str(payload.get("sentiment") or "neutral"),
+            conviction=int(payload.get("conviction") or 3),
+            horizon=str(payload.get("horizon") or ""),
+            source_url=str(payload.get("source_url") or ""),
+            tags=payload.get("tags") if isinstance(payload.get("tags"), list) else str(payload.get("tags") or ""),
+        )
+        return {"status": "saved", "note": note}
+    except Exception as exc:
+        return {"status": "error", "message": f"{type(exc).__name__}: {exc}"}
+
+
+@app.get("/api/research/notes")
+async def list_research_notes(
+    q: str = Query(default=""),
+    ticker: str = Query(default=""),
+    note_type: str = Query(default=""),
+    sentiment: str = Query(default=""),
+    limit: int = Query(default=25, ge=1, le=100),
+) -> dict[str, object]:
+    notes = await asyncio.to_thread(search_notes, q, ticker, note_type, sentiment, limit)
+    return {"status": "ok", "count": len(notes), "notes": notes}
+
+
+@app.get("/api/research/summary")
+async def research_summary(ticker: str = Query(...), limit: int = Query(default=25, ge=1, le=100)) -> dict[str, object]:
+    return await asyncio.to_thread(summarize_ticker, ticker, limit)
+
+
+@app.delete("/api/research/notes/{note_id}")
+async def remove_research_note(note_id: int) -> dict[str, object]:
+    removed = await asyncio.to_thread(delete_note, note_id)
+    return {"status": "deleted" if removed else "missing", "id": note_id}
 
 
 @app.get("/api/company/scan")

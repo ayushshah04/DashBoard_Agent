@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from research_vault import add_note, export_notes_json, summarize_ticker
 from website_scan import scan_company_website_json
 
 
@@ -78,6 +79,47 @@ def run_python(code: str, timeout_seconds: int = 20) -> str:
 def scan_company_website(url: str, max_chars: int = 6000) -> str:
     """Scan a public company website homepage for long-term investment research context."""
     return scan_company_website_json(url, max_chars=max_chars)
+
+
+@mcp.tool()
+def add_research_note(
+    title: str,
+    body: str,
+    tickers: str = "",
+    note_type: str = "note",
+    sentiment: str = "neutral",
+    conviction: int = 3,
+    horizon: str = "",
+    source_url: str = "",
+    tags: str = "",
+) -> str:
+    """Save a structured research note in the local Research Vault."""
+    note = add_note(
+        title=title,
+        body=body,
+        tickers=tickers,
+        note_type=note_type,
+        sentiment=sentiment,
+        conviction=conviction,
+        horizon=horizon,
+        source_url=source_url,
+        tags=tags,
+    )
+    return f"Saved research note {note['id']} for {', '.join(note['tickers']) or 'no ticker'}."
+
+
+@mcp.tool()
+def search_research_notes(query: str = "", ticker: str = "", limit: int = 10) -> str:
+    """Search the local Research Vault by keyword and/or ticker."""
+    return export_notes_json(query=query, ticker=ticker, limit=limit)
+
+
+@mcp.tool()
+def summarize_research_ticker(ticker: str, limit: int = 25) -> str:
+    """Summarize saved Research Vault notes for a ticker."""
+    import json
+
+    return json.dumps(summarize_ticker(ticker, limit=limit), indent=2)
 
 
 if __name__ == "__main__":
