@@ -19,6 +19,22 @@
         "ALPACA_BASE_URL": "${ALPACA_BASE_URL}",
         "ALPACA_TOOLSETS": "${ALPACA_TOOLSETS}"
       }
+    },
+    "newsdata": {
+      "enabled": false,
+      "command": "uvx",
+      "args": ["newsdata-mcp"],
+      "env": {
+        "NEWSDATA_API_KEY": "${NEWSDATA_API_KEY}",
+        "NEWSDATA_BASE_URL": "${NEWSDATA_BASE_URL}"
+      }
+    },
+    "robinhood": {
+      "enabled": true,
+      "enabled_env": "ROBINHOOD_MCP_ENABLED",
+      "transport": "streamable_http",
+      "url": "${ROBINHOOD_MCP_URL}",
+      "timeout": 30
     }
   }
 }

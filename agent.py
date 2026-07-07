@@ -9,20 +9,47 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, AsyncIterator
 
+import httpx
 from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters
+from mcp.client.sse import sse_client
 from mcp.client.stdio import stdio_client
+from mcp.client.streamable_http import streamablehttp_client
 from openai import AsyncOpenAI
 
 
-load_dotenv()
+load_dotenv(encoding="utf-8-sig")
 
 DEFAULT_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.5")
 DEFAULT_SYSTEM_PROMPT = """You are Jarvis, a precise coding agent.
 Use MCP tools when you need file access, execution, market data, account data, or external context.
 For trading-related MCP tools, prefer paper trading unless the user explicitly asks for live trading
 and the server configuration clearly indicates live trading is enabled.
+Never place live orders unless the backend has exposed live trading tools and the user explicitly requests execution.
+Apply configured risk limits before any order: max order notional, max position size, max daily loss, and allowed market universe.
 Explain important tool actions briefly, then return the finished answer with file names and next steps."""
+
+RISKY_LIVE_TOOL_WORDS = (
+    "buy",
+    "sell",
+    "trade",
+    "place_stock_order",
+    "place_crypto_order",
+    "place_option_order",
+    "place_order",
+    "submit_order",
+    "create_order",
+    "replace_order",
+    "replace_order_by_id",
+    "cancel_all_orders",
+    "cancel_order",
+    "cancel_order_by_id",
+    "close_position",
+    "close_all_positions",
+    "exercise",
+    "do_not_exercise",
+    "update_account_config",
+)
 
 
 @dataclass
@@ -60,6 +87,76 @@ def _expanded_env(extra_env: dict[str, str] | None) -> dict[str, str]:
     for key, value in (extra_env or {}).items():
         env[key] = os.path.expandvars(value)
     return env
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def live_trading_unlocked() -> bool:
+    return (
+        not _env_bool("ALPACA_PAPER_TRADE", True)
+        and _env_bool("LIVE_TRADING_ENABLED", False)
+        and os.getenv("LIVE_TRADING_CONFIRMATION") == "I_UNDERSTAND_LIVE_TRADING_RISK"
+    )
+
+
+def robinhood_trading_unlocked() -> bool:
+    return (
+        _env_bool("ROBINHOOD_TRADING_ENABLED", False)
+        and os.getenv("ROBINHOOD_TRADING_CONFIRMATION") == "I_UNDERSTAND_ROBINHOOD_AGENTIC_TRADING_RISK"
+    )
+
+
+def _tool_allowed(server_name: str, tool_name: str) -> bool:
+    if server_name == "alpaca" and (_env_bool("ALPACA_PAPER_TRADE", True) or live_trading_unlocked()):
+        return True
+    if server_name == "robinhood" and robinhood_trading_unlocked():
+        return True
+    return not any(word in tool_name for word in RISKY_LIVE_TOOL_WORDS)
+
+
+def _expanded_headers(headers: dict[str, str] | None) -> dict[str, str] | None:
+    if not headers:
+        return None
+    return {key: os.path.expandvars(value) for key, value in headers.items()}
+
+
+async def _remote_auth_warning(server_name: str, url: str, headers: dict[str, str] | None) -> str | None:
+    if "robinhood.com" not in url:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=10, headers=headers) as client:
+            response = await client.post(
+                url,
+                json={"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
+            )
+    except httpx.HTTPError as exc:
+        return f"Skipped MCP server '{server_name}': remote preflight failed: {type(exc).__name__}: {exc}"
+
+    if response.status_code in {401, 403}:
+        auth_hint = response.headers.get("www-authenticate", "authentication required")
+        return (
+            f"Skipped MCP server '{server_name}': Robinhood MCP requires desktop authentication "
+            f"before this app can list tools. Server said: {auth_hint}"
+        )
+    return None
+
+
+def _server_enabled(server_config: dict[str, Any]) -> bool:
+    enabled_env = server_config.get("enabled_env")
+    if enabled_env:
+        return _env_bool(enabled_env, False)
+    return server_config.get("enabled", True) is not False
+
+
+def _should_surface_connection_warning(server_name: str) -> bool:
+    if server_name == "robinhood":
+        return _env_bool("ROBINHOOD_SHOW_AUTH_WARNINGS", False)
+    return True
 
 
 def _mcp_result_to_text(result: Any) -> str:
@@ -105,7 +202,7 @@ class OpenAIMCPAgent:
         self.model = model
         self.config_path = config_path
         self.system_prompt = system_prompt
-        self.client = AsyncOpenAI()
+        self.client: AsyncOpenAI | None = None
         self.stack = AsyncExitStack()
         self.servers: dict[str, MCPServerHandle] = {}
         self.tool_map: dict[str, tuple[str, str]] = {}
@@ -125,31 +222,59 @@ class OpenAIMCPAgent:
     async def connect(self) -> None:
         config = _load_config(self.config_path)
         for server_name, server_config in config.get("mcpServers", {}).items():
-            if server_config.get("enabled", True) is False:
+            if not _server_enabled(server_config):
                 continue
 
-            command = server_config["command"]
-            args = server_config.get("args", [])
-            if command == "python":
-                command = sys.executable
-            args = [
-                str((_repo_root() / arg).resolve()) if arg.endswith(".py") and not Path(arg).is_absolute() else arg
-                for arg in args
-            ]
-
-            params = StdioServerParameters(
-                command=command,
-                args=args,
-                env=_expanded_env(server_config.get("env")),
-            )
             try:
-                read_stream, write_stream = await self.stack.enter_async_context(stdio_client(params))
+                transport = server_config.get("transport", "stdio")
+                if server_config.get("url"):
+                    url = os.path.expandvars(server_config["url"])
+                    headers = _expanded_headers(server_config.get("headers"))
+                    timeout = float(server_config.get("timeout", 30))
+                    auth_warning = await _remote_auth_warning(server_name, url, headers)
+                    if auth_warning:
+                        if _should_surface_connection_warning(server_name):
+                            self.connection_warnings.append(auth_warning)
+                        continue
+                    if transport in {"streamable_http", "http"}:
+                        read_stream, write_stream, _ = await self.stack.enter_async_context(
+                            streamablehttp_client(url, headers=headers, timeout=timeout)
+                        )
+                    elif transport == "sse":
+                        read_stream, write_stream = await self.stack.enter_async_context(
+                            sse_client(url, headers=headers, timeout=timeout)
+                        )
+                    else:
+                        raise ValueError(f"Unsupported remote MCP transport: {transport}")
+                else:
+                    command = server_config["command"]
+                    args = server_config.get("args", [])
+                    if command == "python":
+                        command = sys.executable
+                    args = [
+                        str((_repo_root() / arg).resolve()) if arg.endswith(".py") and not Path(arg).is_absolute() else arg
+                        for arg in args
+                    ]
+
+                    params = StdioServerParameters(
+                        command=command,
+                        args=args,
+                        env=_expanded_env(server_config.get("env")),
+                    )
+                    read_stream, write_stream = await self.stack.enter_async_context(stdio_client(params))
+
                 session = await self.stack.enter_async_context(ClientSession(read_stream, write_stream))
                 await session.initialize()
                 self.servers[server_name] = MCPServerHandle(server_name, session)
 
                 tools_result = await session.list_tools()
                 for tool in tools_result.tools:
+                    if server_name in {"alpaca", "robinhood"} and not _tool_allowed(server_name, tool.name):
+                        self.connection_warnings.append(
+                            f"Locked trading tool '{server_name}__{tool.name}'. "
+                            "Set the matching live-trading confirmation flags to expose it."
+                        )
+                        continue
                     openai_name = f"{server_name}__{tool.name}"
                     self.tool_map[openai_name] = (server_name, tool.name)
                     self.openai_tools.append(
@@ -183,6 +308,8 @@ class OpenAIMCPAgent:
 
         for turn in range(max_turns):
             yield {"type": "thinking", "message": f"ChatGPT turn {turn + 1}: planning next action"}
+            if self.client is None:
+                self.client = AsyncOpenAI()
             response = await self.client.responses.create(
                 model=self.model,
                 instructions=self.system_prompt,

@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+from website_scan import scan_company_website_json
 
 
 mcp = FastMCP("jarvis-workspace")
@@ -73,6 +74,11 @@ def run_python(code: str, timeout_seconds: int = 20) -> str:
     return "\n\n".join(output)
 
 
+@mcp.tool()
+def scan_company_website(url: str, max_chars: int = 6000) -> str:
+    """Scan a public company website homepage for long-term investment research context."""
+    return scan_company_website_json(url, max_chars=max_chars)
+
+
 if __name__ == "__main__":
     mcp.run()
-

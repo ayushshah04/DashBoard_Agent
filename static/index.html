@@ -41,10 +41,10 @@
     }
     .shell {
       display: grid;
-      grid-template-columns: 260px minmax(0, 1fr) 340px;
-      gap: 16px;
+      grid-template-columns: 220px minmax(0, 1fr) 390px;
+      gap: 10px;
       min-height: 100vh;
-      padding: 18px;
+      padding: 10px;
     }
     header, aside, main, section {
       border: 1px solid var(--line);
@@ -55,8 +55,8 @@
     .side {
       display: flex;
       flex-direction: column;
-      gap: 14px;
-      padding: 16px;
+      gap: 8px;
+      padding: 12px;
     }
     .brand {
       letter-spacing: 0.18em;
@@ -65,7 +65,7 @@
       font-size: 12px;
     }
     .core {
-      width: min(168px, 70vw);
+      width: min(118px, 70vw);
       aspect-ratio: 1;
       margin: 12px auto;
       border-radius: 50%;
@@ -81,14 +81,14 @@
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 10px;
-      padding: 10px 0;
+      padding: 7px 0;
       border-top: 1px solid rgba(115, 220, 255, 0.12);
     }
     .metric span { color: var(--muted); }
     .metric strong { color: var(--green); font-weight: 600; }
     main {
       display: grid;
-      grid-template-rows: auto 1fr auto;
+      grid-template-rows: auto auto auto auto auto 1fr auto;
       min-width: 0;
       overflow: hidden;
     }
@@ -97,12 +97,12 @@
       grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
       gap: 16px;
-      padding: 16px;
+      padding: 10px 12px;
       border-bottom: 1px solid var(--line);
     }
     h1 {
       margin: 0;
-      font-size: clamp(24px, 4vw, 44px);
+      font-size: clamp(20px, 3vw, 32px);
       font-weight: 700;
       letter-spacing: 0;
     }
@@ -115,10 +115,39 @@
     }
     .feed {
       overflow: auto;
-      padding: 16px;
+      padding: 10px;
       display: flex;
       flex-direction: column;
       gap: 12px;
+    }
+    .cockpit {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(7, 16, 20, 0.45);
+    }
+    .control {
+      border: 1px solid rgba(115, 220, 255, 0.18);
+      border-radius: 8px;
+      padding: 8px;
+      background: rgba(5, 7, 10, 0.42);
+      min-width: 0;
+    }
+    .control span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }
+    .control strong {
+      display: block;
+      overflow-wrap: anywhere;
+      color: var(--text);
+      font-size: 13px;
     }
     .bubble {
       max-width: 900px;
@@ -135,12 +164,12 @@
       display: grid;
       grid-template-columns: 1fr auto;
       gap: 12px;
-      padding: 16px;
+      padding: 10px;
       border-top: 1px solid var(--line);
     }
     textarea, input {
       width: 100%;
-      min-height: 52px;
+      min-height: 44px;
       resize: vertical;
       border-radius: 8px;
       border: 1px solid var(--line);
@@ -162,8 +191,8 @@
     button:disabled { opacity: 0.5; cursor: progress; }
     .right {
       display: grid;
-      grid-template-rows: 1fr 1fr;
-      gap: 16px;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 10px;
       min-height: 0;
     }
     section {
@@ -172,10 +201,29 @@
       display: flex;
       flex-direction: column;
     }
+    .dock-panel { display: none; }
+    .dock-panel.active { display: flex; }
+    .panel-tabs {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 6px;
+    }
+    .panel-tabs button {
+      min-height: 34px;
+      padding: 6px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(7, 16, 20, 0.8);
+    }
+    .panel-tabs button.active {
+      color: var(--green);
+      border-color: rgba(93, 240, 176, 0.36);
+      background: rgba(10, 39, 32, 0.58);
+    }
     h2 {
       margin: 0;
       padding: 14px 16px;
-      font-size: 13px;
+      font-size: 12px;
       color: var(--cyan);
       letter-spacing: 0.12em;
       text-transform: uppercase;
@@ -197,9 +245,288 @@
       overflow-wrap: anywhere;
     }
     .pill.hot { color: var(--green); border-color: rgba(93, 240, 176, 0.28); }
+    .pill.warn { color: var(--amber); border-color: rgba(255, 200, 107, 0.3); }
+    .pill a { color: var(--cyan); text-decoration: none; }
+    .pill small {
+      display: block;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+    .prompt-grid {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+    }
+    .compact-form {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      padding: 12px;
+      border: 0;
+    }
+    .compact-form input {
+      min-height: 38px;
+      font-size: 12px;
+    }
+    .compact-form button {
+      min-height: 38px;
+      padding: 8px 10px;
+      font-size: 12px;
+    }
+    .prompt-grid button {
+      min-height: 38px;
+      padding: 8px 10px;
+      text-align: left;
+      font-size: 12px;
+    }
+    .video-frame {
+      width: 100%;
+      height: 100%;
+      min-height: 180px;
+      border: 0;
+      background: #030609;
+    }
+    .video-card {
+      display: grid;
+      gap: 8px;
+    }
+    .fund-strip {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(5, 7, 10, 0.34);
+    }
+    .fund-card {
+      border: 1px solid rgba(115, 220, 255, 0.18);
+      border-radius: 8px;
+      padding: 8px;
+      min-width: 0;
+      background: rgba(7, 16, 20, 0.72);
+    }
+    .fund-card span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 3px;
+    }
+    .fund-card strong {
+      display: block;
+      color: var(--green);
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+    .market-board {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(9, 15, 20, 0.56);
+      min-height: 178px;
+    }
+    .market-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .market-head span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .market-head strong {
+      color: var(--cyan);
+      font-size: 15px;
+      letter-spacing: 0.05em;
+    }
+    .market-head small {
+      color: var(--muted);
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    .market-tabs {
+      display: grid;
+      grid-template-columns: repeat(9, minmax(0, 1fr));
+      gap: 5px;
+    }
+    .market-tabs button {
+      min-height: 28px;
+      padding: 4px 6px;
+      font-size: 10px;
+      color: var(--muted);
+      background: rgba(7, 16, 20, 0.82);
+    }
+    .market-tabs button.active {
+      color: var(--green);
+      border-color: rgba(93, 240, 176, 0.38);
+      background: rgba(10, 39, 32, 0.58);
+    }
+    .market-list {
+      display: grid;
+      gap: 5px;
+      min-height: 0;
+      overflow: auto;
+    }
+    .market-row {
+      display: grid;
+      grid-template-columns: minmax(112px, 1.2fr) repeat(4, minmax(70px, 0.75fr)) minmax(100px, 1fr);
+      gap: 8px;
+      align-items: center;
+      min-height: 30px;
+      padding: 6px 8px;
+      border: 1px solid rgba(115, 220, 255, 0.14);
+      border-radius: 8px;
+      background: rgba(5, 7, 10, 0.42);
+      font-variant-numeric: tabular-nums;
+    }
+    .market-row a {
+      color: var(--cyan);
+      text-decoration: none;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .market-symbol {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 500;
+    }
+    .market-price { color: var(--text); font-weight: 700; }
+    .market-time { color: var(--muted); font-size: 11px; text-align: right; }
+    .market-up { color: var(--green); }
+    .market-down { color: var(--red); }
+    .market-flat { color: var(--amber); }
+    .mover-board {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 8px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(5, 7, 10, 0.42);
+      min-height: 240px;
+    }
+    .mover-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 12px;
+      align-items: center;
+    }
+    .mover-head span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .mover-head strong {
+      color: var(--cyan);
+      font-size: 15px;
+      letter-spacing: 0.05em;
+    }
+    .mover-head small {
+      color: var(--muted);
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+    .mover-tabs {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 5px;
+    }
+    .mover-tabs button {
+      min-height: 28px;
+      padding: 4px 6px;
+      font-size: 10px;
+      color: var(--muted);
+      background: rgba(7, 16, 20, 0.82);
+    }
+    .mover-tabs button.active {
+      color: var(--green);
+      border-color: rgba(93, 240, 176, 0.38);
+      background: rgba(10, 39, 32, 0.58);
+    }
+    .mover-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      min-height: 0;
+      overflow: hidden;
+    }
+    .mover-lane {
+      min-width: 0;
+      min-height: 0;
+      overflow: auto;
+      border: 1px solid rgba(115, 220, 255, 0.14);
+      border-radius: 8px;
+      background: rgba(7, 16, 20, 0.58);
+    }
+    .mover-lane h3 {
+      margin: 0;
+      padding: 7px 8px;
+      color: var(--cyan);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      border-bottom: 1px solid rgba(115, 220, 255, 0.14);
+    }
+    .mover-rows {
+      display: grid;
+      gap: 4px;
+      padding: 6px;
+    }
+    .mover-row {
+      display: grid;
+      grid-template-columns: minmax(86px, 1.1fr) repeat(3, minmax(58px, 0.7fr)) minmax(72px, 0.8fr);
+      gap: 6px;
+      align-items: center;
+      min-height: 30px;
+      padding: 5px 6px;
+      border: 1px solid rgba(115, 220, 255, 0.12);
+      border-radius: 8px;
+      background: rgba(5, 7, 10, 0.38);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+    .mover-row.header {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 9px;
+      min-height: 24px;
+      background: rgba(16, 26, 33, 0.52);
+    }
+    .mover-row a {
+      color: var(--cyan);
+      text-decoration: none;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .mover-row small {
+      display: block;
+      color: var(--muted);
+      font-weight: 500;
+      line-height: 1.2;
+    }
+    .mover-meta { color: var(--muted); text-align: right; }
     @media (max-width: 1050px) {
       .shell { grid-template-columns: 1fr; }
       .right { grid-template-rows: auto auto; }
+      .cockpit { grid-template-columns: 1fr; }
+      .fund-strip { grid-template-columns: 1fr 1fr; }
+      .market-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .market-row { grid-template-columns: 1.2fr 1fr 1fr; }
+      .market-trend, .market-time { grid-column: auto; text-align: left; }
+      .mover-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .mover-grid { grid-template-columns: 1fr; }
+      .mover-row { grid-template-columns: 1.2fr 0.8fr 0.8fr; }
+      .mover-meta { text-align: left; }
       form { grid-template-columns: 1fr; }
       button { min-height: 46px; }
     }
@@ -213,13 +540,66 @@
       <div class="metric"><span>Model</span><strong id="model">gpt-5.5</strong></div>
       <div class="metric"><span>MCP servers</span><strong id="serverCount">0</strong></div>
       <div class="metric"><span>Tools</span><strong id="toolCount">0</strong></div>
-      <div class="metric"><span>Mode</span><strong>Paper-safe</strong></div>
+      <div class="metric"><span>Mode</span><strong id="tradeMode">Paper-safe</strong></div>
+      <div class="metric"><span>Currency</span><strong id="accountCurrency">USD</strong></div>
     </aside>
 
     <main>
       <div class="topbar">
         <h1>Coding Command Deck</h1>
         <div class="status" id="status">Idle</div>
+      </div>
+      <div class="fund-strip">
+        <div class="fund-card"><span>Portfolio</span><strong id="fundPortfolio">--</strong></div>
+        <div class="fund-card"><span>Buying Power</span><strong id="fundBuyingPower">--</strong></div>
+        <div class="fund-card"><span>Cash</span><strong id="fundCash">--</strong></div>
+        <div class="fund-card"><span>Equity</span><strong id="fundEquity">--</strong></div>
+        <div class="fund-card"><span>Status</span><strong id="fundStatus">--</strong></div>
+      </div>
+      <div class="market-board">
+        <div class="market-head">
+          <div>
+            <span>Market Pulse</span>
+            <strong id="marketGroupTitle">US</strong>
+          </div>
+          <small id="marketStatus">Loading snapshots</small>
+        </div>
+        <div class="market-tabs" id="marketTabs"></div>
+        <div class="market-list" id="marketList"></div>
+      </div>
+      <div class="mover-board">
+        <div class="mover-head">
+          <div>
+            <span>Market Movers</span>
+            <strong id="moverGroupTitle">US</strong>
+          </div>
+          <small id="moverStatus">Loading movers</small>
+        </div>
+        <div class="mover-tabs" id="moverTabs"></div>
+        <div class="mover-grid">
+          <div class="mover-lane">
+            <h3>Top</h3>
+            <div class="mover-rows" id="moverTopRows"></div>
+          </div>
+          <div class="mover-lane">
+            <h3>Bottom</h3>
+            <div class="mover-rows" id="moverBottomRows"></div>
+          </div>
+          <div class="mover-lane">
+            <h3>Most Active</h3>
+            <div class="mover-rows" id="mostActiveRows"></div>
+          </div>
+          <div class="mover-lane">
+            <h3>Unusual Volume</h3>
+            <div class="mover-rows" id="unusualVolumeRows"></div>
+          </div>
+        </div>
+      </div>
+      <div class="cockpit">
+        <div class="control"><span>Markets</span><strong id="markets">Loading</strong></div>
+        <div class="control"><span>Risk</span><strong id="risk">Loading</strong></div>
+        <div class="control"><span>Order Tools</span><strong id="orderTools">Loading</strong></div>
+        <div class="control"><span>Robinhood MCP</span><strong id="robinhoodStatus">Disabled</strong></div>
       </div>
       <div class="feed" id="feed"></div>
       <form id="form">
@@ -229,13 +609,58 @@
     </main>
 
     <div class="right">
-      <section>
+      <div class="panel-tabs">
+        <button class="active" data-panel="panel-tools" type="button">Tools</button>
+        <button data-panel="panel-activity" type="button">Activity</button>
+        <button data-panel="panel-news" type="button">News</button>
+        <button data-panel="panel-research" type="button">Research</button>
+        <button data-panel="panel-video" type="button">Video</button>
+      </div>
+      <section class="dock-panel active" id="panel-tools">
         <h2>Tool Registry</h2>
         <div class="list" id="tools"></div>
       </section>
-      <section>
+      <section class="dock-panel" id="panel-activity">
         <h2>Live Activity</h2>
         <div class="list" id="activity"></div>
+      </section>
+      <section class="dock-panel" id="panel-news">
+        <h2>News Factor Screen</h2>
+        <div class="list" id="newsFactors"></div>
+        <h2>Alpaca News Impact</h2>
+        <div class="compact-form">
+          <input id="alpacaNewsSymbols" type="text" placeholder="TSLA,AAPL,NVDA,SPY,QQQ">
+          <button id="refreshAlpacaNews" type="button">Refresh</button>
+        </div>
+        <div class="list" id="alpacaNewsTickers"></div>
+        <div class="list" id="alpacaNewsFeed"></div>
+        <h2>Newsdata.io Feed</h2>
+        <div class="prompt-grid">
+          <button id="refreshNewsdata" type="button">Refresh market headlines</button>
+        </div>
+        <div class="list" id="newsDataFeed"></div>
+      </section>
+      <section class="dock-panel" id="panel-research">
+        <h2>Company Website Scan</h2>
+        <div class="compact-form">
+          <input id="companyUrl" type="url" placeholder="https://company.com">
+          <button id="scanCompany" type="button">Scan</button>
+        </div>
+        <div class="list" id="companyScanResults"></div>
+        <h2>Options Research</h2>
+        <div class="list" id="optionsFactors">
+          <div class="pill">Option chain liquidity and bid/ask spread</div>
+          <div class="pill">Expiration, assignment, and exercise risk</div>
+          <div class="pill">Max loss before max gain</div>
+          <div class="pill">Covered calls, protective puts, and cash-secured puts</div>
+          <div class="pill warn">No options order without explicit confirmation and unlocked order tools</div>
+        </div>
+        <h2>Automation Prompts</h2>
+        <div class="prompt-grid" id="promptButtons"></div>
+      </section>
+      <section class="dock-panel" id="panel-video">
+        <h2>Live News Video</h2>
+        <div class="list" id="videoSlot"></div>
       </section>
     </div>
   </div>
@@ -251,8 +676,48 @@
     const modelEl = document.querySelector("#model");
     const toolCount = document.querySelector("#toolCount");
     const serverCount = document.querySelector("#serverCount");
+    const tradeMode = document.querySelector("#tradeMode");
+    const accountCurrency = document.querySelector("#accountCurrency");
+    const fundPortfolio = document.querySelector("#fundPortfolio");
+    const fundBuyingPower = document.querySelector("#fundBuyingPower");
+    const fundCash = document.querySelector("#fundCash");
+    const fundEquity = document.querySelector("#fundEquity");
+    const fundStatus = document.querySelector("#fundStatus");
+    const marketGroupTitle = document.querySelector("#marketGroupTitle");
+    const marketStatus = document.querySelector("#marketStatus");
+    const marketTabs = document.querySelector("#marketTabs");
+    const marketList = document.querySelector("#marketList");
+    const moverGroupTitle = document.querySelector("#moverGroupTitle");
+    const moverStatus = document.querySelector("#moverStatus");
+    const moverTabs = document.querySelector("#moverTabs");
+    const moverTopRows = document.querySelector("#moverTopRows");
+    const moverBottomRows = document.querySelector("#moverBottomRows");
+    const mostActiveRows = document.querySelector("#mostActiveRows");
+    const unusualVolumeRows = document.querySelector("#unusualVolumeRows");
+    const markets = document.querySelector("#markets");
+    const risk = document.querySelector("#risk");
+    const orderTools = document.querySelector("#orderTools");
+    const robinhoodStatus = document.querySelector("#robinhoodStatus");
+    const newsFactors = document.querySelector("#newsFactors");
+    const newsDataFeed = document.querySelector("#newsDataFeed");
+    const refreshNewsdata = document.querySelector("#refreshNewsdata");
+    const alpacaNewsSymbols = document.querySelector("#alpacaNewsSymbols");
+    const refreshAlpacaNews = document.querySelector("#refreshAlpacaNews");
+    const alpacaNewsTickers = document.querySelector("#alpacaNewsTickers");
+    const alpacaNewsFeed = document.querySelector("#alpacaNewsFeed");
+    const companyUrl = document.querySelector("#companyUrl");
+    const scanCompany = document.querySelector("#scanCompany");
+    const companyScanResults = document.querySelector("#companyScanResults");
+    const promptButtons = document.querySelector("#promptButtons");
+    const videoSlot = document.querySelector("#videoSlot");
+    const panelTabs = Array.from(document.querySelectorAll(".panel-tabs button"));
+    const dockPanels = Array.from(document.querySelectorAll(".dock-panel"));
 
     let socket;
+    let marketOverview = {};
+    let activeMarketGroup = "US";
+    let marketMovers = {};
+    let activeMoverGroup = "US";
 
     function addBubble(text, kind = "") {
       const div = document.createElement("div");
@@ -267,6 +732,598 @@
       div.className = `pill ${hot ? "hot" : ""}`;
       div.textContent = text;
       activityEl.prepend(div);
+    }
+
+    function renderRegistry(msg) {
+      modelEl.textContent = msg.model || "--";
+      serverCount.textContent = (msg.servers || []).length;
+      toolCount.textContent = (msg.tools || []).length;
+      toolsEl.innerHTML = "";
+      (msg.tools || []).forEach((tool) => {
+        const div = document.createElement("div");
+        div.className = "pill hot";
+        div.textContent = tool;
+        toolsEl.appendChild(div);
+      });
+      addActivity(`Loaded ${(msg.tools || []).length} tools from ${(msg.servers || []).join(", ") || "no MCP servers"}`, true);
+      (msg.warnings || []).forEach((warning) => addActivity(warning));
+    }
+
+    function setPanel(panelId) {
+      panelTabs.forEach((button) => button.classList.toggle("active", button.dataset.panel === panelId));
+      dockPanels.forEach((panel) => panel.classList.toggle("active", panel.id === panelId));
+    }
+
+    panelTabs.forEach((button) => {
+      button.addEventListener("click", () => setPanel(button.dataset.panel));
+    });
+
+    function formatMoney(value, currency = "USD") {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "--";
+      return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency,
+        maximumFractionDigits: 2,
+      }).format(number);
+    }
+
+    function formatMarketNumber(value, digits = 2) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "--";
+      return new Intl.NumberFormat("en-US", {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      }).format(number);
+    }
+
+    function formatSignedNumber(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "--";
+      const sign = number > 0 ? "+" : "";
+      return `${sign}${formatMarketNumber(number, 2)}`;
+    }
+
+    function formatSignedPercent(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "--";
+      const sign = number > 0 ? "+" : "";
+      return `${sign}${formatMarketNumber(number, 2)}%`;
+    }
+
+    function formatCompactNumber(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "--";
+      return new Intl.NumberFormat("en-US", {
+        notation: "compact",
+        maximumFractionDigits: 1,
+      }).format(number);
+    }
+
+    function formatRatio(value) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return "--";
+      return `${formatMarketNumber(number, 2)}x`;
+    }
+
+    function formatMarketTime(value) {
+      if (!value) return "LAST | --";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return `LAST | ${value}`;
+      return `LAST | ${date.toLocaleString([], {
+        month: "numeric",
+        day: "numeric",
+        year: "2-digit",
+        hour: "numeric",
+        minute: "2-digit",
+      })}`;
+    }
+
+    function marketMoveClass(item) {
+      if (Number(item.change) > 0) return "market-up";
+      if (Number(item.change) < 0) return "market-down";
+      return "market-flat";
+    }
+
+    function renderMarketTabs(groups) {
+      marketTabs.innerHTML = "";
+      Object.keys(groups).forEach((groupName) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = groupName;
+        button.classList.toggle("active", groupName === activeMarketGroup);
+        button.addEventListener("click", () => {
+          activeMarketGroup = groupName;
+          renderMarketOverview();
+        });
+        marketTabs.appendChild(button);
+      });
+    }
+
+    function renderMarketOverview() {
+      const groups = marketOverview.groups || {};
+      const groupNames = Object.keys(groups);
+      if (!groupNames.length) {
+        marketList.innerHTML = '<div class="pill warn">Market snapshots unavailable.</div>';
+        return;
+      }
+      if (!groups[activeMarketGroup]) activeMarketGroup = groupNames[0];
+      renderMarketTabs(groups);
+      marketGroupTitle.textContent = activeMarketGroup;
+      marketList.innerHTML = "";
+      groups[activeMarketGroup].forEach((item) => {
+        const moveClass = marketMoveClass(item);
+        const row = document.createElement("div");
+        row.className = "market-row";
+        row.innerHTML = `
+          <a href="${item.href}" target="_blank" rel="noreferrer">${item.label}<span class="market-symbol">${item.symbol}</span></a>
+          <span class="market-price">${formatMarketNumber(item.price, item.kind === "crypto" ? 2 : 2)}</span>
+          <span class="market-trend ${moveClass}">${item.trend || "No trend"}</span>
+          <span class="${moveClass}">${formatSignedNumber(item.change)}</span>
+          <span class="${moveClass}">${formatSignedPercent(item.change_percent)}</span>
+          <span class="market-time">${formatMarketTime(item.timestamp)}</span>
+        `;
+        marketList.appendChild(row);
+      });
+    }
+
+    async function loadMarketOverview() {
+      try {
+        const data = await fetch("/api/markets/overview").then((res) => res.json());
+        marketOverview = data;
+        marketStatus.textContent = data.configured ? (data.source || "Market snapshots") : (data.message || "Unavailable");
+        if (data.warnings && data.warnings.length) {
+          marketStatus.textContent = data.warnings.join(" | ");
+        }
+        renderMarketOverview();
+      } catch (error) {
+        marketStatus.textContent = "Market snapshots failed";
+        marketList.innerHTML = `<div class="pill warn">${error.message}</div>`;
+      }
+    }
+
+    function renderMoverTabs(groups) {
+      moverTabs.innerHTML = "";
+      Object.keys(groups).forEach((groupName) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = groupName;
+        button.classList.toggle("active", groupName === activeMoverGroup);
+        button.addEventListener("click", () => {
+          activeMoverGroup = groupName;
+          renderMarketMovers();
+        });
+        moverTabs.appendChild(button);
+      });
+    }
+
+    function makeMoverHeader(metricLabel) {
+      const row = document.createElement("div");
+      row.className = "mover-row header";
+      ["Name", "Price", "Chg", "%Chg", metricLabel].forEach((label) => {
+        const span = document.createElement("span");
+        span.textContent = label;
+        row.appendChild(span);
+      });
+      return row;
+    }
+
+    function makeMoverRow(item, metricKind = "volume") {
+      const row = document.createElement("div");
+      row.className = "mover-row";
+      const moveClass = marketMoveClass(item);
+
+      const link = document.createElement("a");
+      link.href = item.href || `https://www.cnbc.com/quotes/${item.symbol}`;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+      link.textContent = item.symbol || "--";
+      const name = document.createElement("small");
+      name.textContent = item.name || "";
+      link.appendChild(name);
+
+      const price = document.createElement("span");
+      price.className = "market-price";
+      price.textContent = formatMarketNumber(item.price, 2);
+
+      const change = document.createElement("span");
+      change.className = moveClass;
+      change.textContent = formatSignedNumber(item.change);
+
+      const percent = document.createElement("span");
+      percent.className = moveClass;
+      percent.textContent = formatSignedPercent(item.change_percent);
+
+      const metric = document.createElement("span");
+      metric.className = "mover-meta";
+      metric.textContent = metricKind === "ratio" ? formatRatio(item.volume_ratio) : formatCompactNumber(item.volume);
+
+      row.append(link, price, change, percent, metric);
+      return row;
+    }
+
+    function renderMoverList(container, rows, metricLabel, metricKind = "volume") {
+      container.innerHTML = "";
+      container.appendChild(makeMoverHeader(metricLabel));
+      if (!rows || !rows.length) {
+        const empty = document.createElement("div");
+        empty.className = "pill warn";
+        empty.textContent = "No rows returned.";
+        container.appendChild(empty);
+        return;
+      }
+      rows.forEach((item) => container.appendChild(makeMoverRow(item, metricKind)));
+    }
+
+    function renderMarketMovers() {
+      const tabs = marketMovers.mover_tabs || {};
+      const tabNames = Object.keys(tabs);
+      if (!tabNames.length) {
+        moverTopRows.innerHTML = '<div class="pill warn">Market movers unavailable.</div>';
+        return;
+      }
+      if (!tabs[activeMoverGroup]) activeMoverGroup = tabNames[0];
+      renderMoverTabs(tabs);
+      moverGroupTitle.textContent = activeMoverGroup;
+      renderMoverList(moverTopRows, tabs[activeMoverGroup].top, "Move");
+      renderMoverList(moverBottomRows, tabs[activeMoverGroup].bottom, "Move");
+      renderMoverList(mostActiveRows, marketMovers.most_active || [], "Vol");
+      renderMoverList(unusualVolumeRows, marketMovers.unusual_volume || [], "X10 Day", "ratio");
+    }
+
+    async function loadMarketMovers() {
+      try {
+        const data = await fetch("/api/markets/movers?top=5").then((res) => res.json());
+        marketMovers = data;
+        moverStatus.textContent = data.configured ? (data.source || "Alpaca movers") : (data.message || "Unavailable");
+        if (data.last_updated) moverStatus.textContent = `Updated ${formatMarketTime(data.last_updated).replace("LAST | ", "")}`;
+        if (data.warnings && data.warnings.length) addActivity(data.warnings.join(" | "));
+        renderMarketMovers();
+      } catch (error) {
+        moverStatus.textContent = "Market movers failed";
+        moverTopRows.innerHTML = `<div class="pill warn">${error.message}</div>`;
+      }
+    }
+
+    async function loadAccountFunds() {
+      try {
+        const data = await fetch("/api/alpaca/account").then((res) => res.json());
+        if (!data.configured || data.status === "error") {
+          fundStatus.textContent = "Unavailable";
+          fundPortfolio.textContent = "--";
+          fundBuyingPower.textContent = "--";
+          fundCash.textContent = "--";
+          fundEquity.textContent = "--";
+          addActivity(data.message || "Alpaca account funds unavailable.");
+          return;
+        }
+        const acct = data.account || {};
+        const currency = data.currency || "USD";
+        accountCurrency.textContent = currency;
+        fundPortfolio.textContent = formatMoney(acct.portfolio_value, currency);
+        fundBuyingPower.textContent = formatMoney(acct.buying_power, currency);
+        fundCash.textContent = formatMoney(acct.cash, currency);
+        fundEquity.textContent = formatMoney(acct.equity, currency);
+        fundStatus.textContent = `${data.mode || "paper"} | ${acct.status || "unknown"}`;
+      } catch (error) {
+        fundStatus.textContent = "Error";
+        addActivity(`Alpaca funds failed: ${error.message}`);
+      }
+    }
+
+    async function loadTradingCockpit() {
+      const [config, prompts] = await Promise.all([
+        fetch("/api/trading/config").then((res) => res.json()),
+        fetch("/api/trading/prompts").then((res) => res.json()),
+      ]);
+      tradeMode.textContent = config.paper ? "Paper-safe" : (config.live_trading_enabled ? "Live unlocked" : "Live locked");
+      accountCurrency.textContent = config.currency || "USD";
+      markets.textContent = config.markets.join(", ");
+      risk.textContent = `Order $${config.risk.max_order_notional_usd} | Position $${config.risk.max_position_usd} | Daily loss $${config.risk.max_daily_loss_usd}`;
+      orderTools.textContent = config.order_tools_locked ? "Locked" : "Available";
+      if (config.robinhood?.trading_enabled) {
+        robinhoodStatus.textContent = "Trading unlocked";
+      } else if (config.robinhood?.mcp_enabled) {
+        robinhoodStatus.textContent = "Enabled, auth required";
+      } else {
+        robinhoodStatus.textContent = "Disabled";
+      }
+
+      newsFactors.innerHTML = "";
+      config.news.factors.forEach((factor) => {
+        const div = document.createElement("div");
+        div.className = "pill";
+        div.textContent = `Tracking ${factor}`;
+        newsFactors.appendChild(div);
+      });
+
+      promptButtons.innerHTML = "";
+      Object.entries(prompts).forEach(([name, text]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = name.replaceAll("_", " ");
+        button.title = text;
+        button.addEventListener("click", () => {
+          promptBox.value = text;
+          promptBox.focus();
+        });
+        promptButtons.appendChild(button);
+      });
+
+      videoSlot.innerHTML = "";
+      if (config.news.video_urls && config.news.video_urls.length) {
+        config.news.video_urls.forEach((video) => {
+          const wrapper = document.createElement("div");
+          wrapper.className = "pill video-card";
+          const iframe = document.createElement("iframe");
+          iframe.className = "video-frame";
+          iframe.src = video.embed_url;
+          iframe.title = video.label;
+          iframe.allow = "autoplay; encrypted-media; picture-in-picture";
+          iframe.allowFullscreen = true;
+          const link = document.createElement("a");
+          link.href = video.source_url;
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.textContent = `Open ${video.label}`;
+          wrapper.appendChild(iframe);
+          wrapper.appendChild(link);
+          videoSlot.appendChild(wrapper);
+        });
+      } else {
+        const div = document.createElement("div");
+        div.className = "pill warn";
+        div.textContent = "Set NEWS_VIDEO_URLS to YouTube or embeddable live news stream URLs.";
+        videoSlot.appendChild(div);
+      }
+    }
+
+    async function loadMcpRegistry() {
+      try {
+        const registry = await fetch("/api/mcp/registry").then((res) => res.json());
+        renderRegistry(registry);
+      } catch (error) {
+        addActivity(`MCP registry failed: ${error.message}`);
+      }
+    }
+
+    function headlineText(article) {
+      return `${article.title || ""} ${article.source || ""}`.toLowerCase();
+    }
+
+    function countMatches(articles, terms) {
+      return articles.filter((article) => terms.some((term) => headlineText(article).includes(term))).length;
+    }
+
+    function renderNewsFactors(data) {
+      newsFactors.innerHTML = "";
+      const articles = data.results || [];
+      if (!data.configured) {
+        const div = document.createElement("div");
+        div.className = "pill warn";
+        div.textContent = data.message || "Newsdata.io is not configured.";
+        newsFactors.appendChild(div);
+        return;
+      }
+      if (!articles.length) {
+        const div = document.createElement("div");
+        div.className = "pill warn";
+        div.textContent = data.message || "No live headlines returned for factor scoring.";
+        newsFactors.appendChild(div);
+        return;
+      }
+
+      const latest = articles.map((article) => article.published).filter(Boolean).sort().pop();
+      const sources = {};
+      articles.forEach((article) => {
+        const source = article.source || "Unknown";
+        sources[source] = (sources[source] || 0) + 1;
+      });
+      const topSources = Object.entries(sources)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([source, count]) => `${source} (${count})`)
+        .join(", ");
+
+      const summary = document.createElement("div");
+      summary.className = "pill hot";
+      summary.textContent = `Live scan: ${articles.length} headlines | Total matches: ${data.total_results || "unknown"} | Latest: ${latest || "unknown"}`;
+      newsFactors.appendChild(summary);
+
+      if (topSources) {
+        const sourcePill = document.createElement("div");
+        sourcePill.className = "pill";
+        sourcePill.textContent = `Top sources: ${topSources}`;
+        newsFactors.appendChild(sourcePill);
+      }
+
+      const factorMap = [
+        ["Breaking", ["breaking", "urgent", "alert", "jumps", "falls", "surges", "plunges"]],
+        ["Earnings", ["earnings", "revenue", "guidance", "profit", "eps", "quarter"]],
+        ["Market movers", ["stock", "shares", "market", "movers", "upgrade", "downgrade", "rating"]],
+        ["Macro", ["fed", "rates", "inflation", "jobs", "tariff", "tax", "gdp", "treasury"]],
+        ["Crypto", ["crypto", "bitcoin", "ethereum", "solana", "token", "blockchain"]],
+        ["Corporate actions", ["acquire", "merger", "buyback", "dividend", "split", "offering", "lawsuit"]],
+      ];
+
+      factorMap.forEach(([label, terms]) => {
+        const count = countMatches(articles, terms);
+        const div = document.createElement("div");
+        div.className = `pill ${count ? "hot" : ""}`;
+        div.textContent = `${label}: ${count} matching headline${count === 1 ? "" : "s"}`;
+        newsFactors.appendChild(div);
+      });
+    }
+
+    async function loadNewsdata() {
+      newsDataFeed.innerHTML = "";
+      const loading = document.createElement("div");
+      loading.className = "pill";
+      loading.textContent = "Loading Newsdata.io headlines...";
+      newsDataFeed.appendChild(loading);
+
+      try {
+        const data = await fetch("/api/newsdata/latest?size=10").then((res) => res.json());
+        renderNewsFactors(data);
+        newsDataFeed.innerHTML = "";
+        if (!data.configured) {
+          const div = document.createElement("div");
+          div.className = "pill warn";
+          div.textContent = data.message;
+          newsDataFeed.appendChild(div);
+          return;
+        }
+        if (!data.results.length) {
+          const div = document.createElement("div");
+          div.className = "pill warn";
+          div.textContent = "No Newsdata.io headlines returned for the current query.";
+          newsDataFeed.appendChild(div);
+          return;
+        }
+        data.results.forEach((article) => {
+          const div = document.createElement("div");
+          div.className = "pill hot";
+          const link = document.createElement("a");
+          link.href = article.link || "#";
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.textContent = article.title || "Untitled headline";
+          const meta = document.createElement("small");
+          meta.textContent = [article.source, article.published, article.sentiment].filter(Boolean).join(" | ");
+          div.appendChild(link);
+          div.appendChild(meta);
+          newsDataFeed.appendChild(div);
+        });
+      } catch (error) {
+        newsDataFeed.innerHTML = "";
+        newsFactors.innerHTML = "";
+        const factorError = document.createElement("div");
+        factorError.className = "pill warn";
+        factorError.textContent = `News factor scan failed: ${error.message}`;
+        newsFactors.appendChild(factorError);
+        const div = document.createElement("div");
+        div.className = "pill warn";
+        div.textContent = `Newsdata.io error: ${error.message}`;
+        newsDataFeed.appendChild(div);
+      }
+    }
+
+    function renderTickerChips(tickers) {
+      alpacaNewsTickers.innerHTML = "";
+      if (!tickers || !tickers.length) {
+        const div = document.createElement("div");
+        div.className = "pill warn";
+        div.textContent = "No affected tickers returned.";
+        alpacaNewsTickers.appendChild(div);
+        return;
+      }
+      tickers.slice(0, 12).forEach((ticker) => {
+        const div = document.createElement("div");
+        div.className = "pill hot";
+        div.textContent = `${ticker.symbol}: ${ticker.count} headline${ticker.count === 1 ? "" : "s"}`;
+        alpacaNewsTickers.appendChild(div);
+      });
+    }
+
+    async function loadAlpacaNews() {
+      alpacaNewsFeed.innerHTML = "";
+      const loading = document.createElement("div");
+      loading.className = "pill";
+      loading.textContent = "Loading Alpaca ticker-linked news...";
+      alpacaNewsFeed.appendChild(loading);
+
+      try {
+        const query = alpacaNewsSymbols.value.trim();
+        const url = `/api/alpaca/news?limit=8${query ? `&symbols=${encodeURIComponent(query)}` : ""}`;
+        const data = await fetch(url).then((res) => res.json());
+        alpacaNewsFeed.innerHTML = "";
+        if (!data.configured || data.status === "error") {
+          const div = document.createElement("div");
+          div.className = "pill warn";
+          div.textContent = data.message || "Alpaca news unavailable.";
+          alpacaNewsFeed.appendChild(div);
+          renderTickerChips([]);
+          return;
+        }
+        alpacaNewsSymbols.value = (data.query_symbols || []).join(",");
+        renderTickerChips(data.tickers || []);
+        if (!data.articles.length) {
+          const div = document.createElement("div");
+          div.className = "pill warn";
+          div.textContent = "No Alpaca news returned for the selected tickers.";
+          alpacaNewsFeed.appendChild(div);
+          return;
+        }
+        data.articles.forEach((article) => {
+          const div = document.createElement("div");
+          div.className = "pill hot";
+          const link = document.createElement("a");
+          link.href = article.url || "#";
+          link.target = "_blank";
+          link.rel = "noreferrer";
+          link.textContent = article.headline || "Untitled Alpaca headline";
+          const meta = document.createElement("small");
+          meta.textContent = [article.source, article.created_at].filter(Boolean).join(" | ");
+          const tickers = document.createElement("small");
+          tickers.textContent = `Affects: ${(article.symbols || []).join(", ") || "unknown"}`;
+          div.append(link, meta, tickers);
+          alpacaNewsFeed.appendChild(div);
+        });
+      } catch (error) {
+        alpacaNewsFeed.innerHTML = "";
+        const div = document.createElement("div");
+        div.className = "pill warn";
+        div.textContent = `Alpaca news error: ${error.message}`;
+        alpacaNewsFeed.appendChild(div);
+      }
+    }
+
+    function addScanPill(text, hot = false) {
+      const div = document.createElement("div");
+      div.className = `pill ${hot ? "hot" : ""}`;
+      div.textContent = text;
+      companyScanResults.appendChild(div);
+      return div;
+    }
+
+    async function scanCompanyWebsite() {
+      const url = companyUrl.value.trim();
+      companyScanResults.innerHTML = "";
+      if (!url) {
+        addScanPill("Enter a company website URL first.");
+        return;
+      }
+      addScanPill("Scanning public company website...");
+      try {
+        const data = await fetch(`/api/company/scan?url=${encodeURIComponent(url)}&max_chars=6000`).then((res) => res.json());
+        companyScanResults.innerHTML = "";
+        if (data.error) {
+          addScanPill(data.error);
+          return;
+        }
+        addScanPill(data.title || data.url, true);
+        if (data.description) addScanPill(data.description);
+        if (data.headings && data.headings.length) {
+          addScanPill(`Signals: ${data.headings.slice(0, 6).join(" | ")}`);
+        }
+        Object.entries(data.link_map || {}).slice(0, 8).forEach(([group, links]) => {
+          const div = document.createElement("div");
+          div.className = "pill";
+          const label = document.createElement("strong");
+          label.textContent = group.replaceAll("_", " ");
+          div.appendChild(label);
+          links.slice(0, 3).forEach((link) => {
+            const small = document.createElement("small");
+            small.textContent = `${link.text} - ${link.href}`;
+            div.appendChild(small);
+          });
+          companyScanResults.appendChild(div);
+        });
+        promptBox.value = `Use the company website scan for ${data.url}, then build a long-term investment research report. Include business quality, moat, growth drivers, risks, valuation context, Newsdata.io headlines, Alpaca market data, and options risk context. Do not place orders.`;
+      } catch (error) {
+        companyScanResults.innerHTML = "";
+        addScanPill(`Website scan failed: ${error.message}`);
+      }
     }
 
     function connect() {
@@ -286,17 +1343,7 @@
       socket.onmessage = (event) => {
         const msg = JSON.parse(event.data);
         if (msg.type === "registry") {
-          modelEl.textContent = msg.model;
-          serverCount.textContent = msg.servers.length;
-          toolCount.textContent = msg.tools.length;
-          toolsEl.innerHTML = "";
-          msg.tools.forEach((tool) => {
-            const div = document.createElement("div");
-            div.className = "pill hot";
-            div.textContent = tool;
-            toolsEl.appendChild(div);
-          });
-          addActivity(`Loaded ${msg.tools.length} tools from ${msg.servers.join(", ")}`, true);
+          renderRegistry(msg);
         } else if (msg.type === "assistant_text") {
           addBubble(msg.text);
         } else if (msg.type === "tool_call") {
@@ -335,6 +1382,21 @@
     });
 
     promptBox.value = "Build a Python prime checker, save it as prime.py, and test it with 97.";
+    loadTradingCockpit().catch((error) => addActivity(`Trading cockpit failed: ${error.message}`));
+    loadMcpRegistry();
+    loadMarketOverview();
+    loadMarketMovers();
+    loadAccountFunds();
+    setInterval(loadAccountFunds, 60000);
+    setInterval(loadMarketOverview, 120000);
+    setInterval(loadMarketMovers, 180000);
+    refreshNewsdata.addEventListener("click", loadNewsdata);
+    alpacaNewsSymbols.value = "TSLA,AAPL,NVDA,SPY,QQQ";
+    refreshAlpacaNews.addEventListener("click", loadAlpacaNews);
+    scanCompany.addEventListener("click", scanCompanyWebsite);
+    loadAlpacaNews();
+    loadNewsdata();
+    setInterval(loadNewsdata, 300000);
     connect();
   </script>
 </body>
