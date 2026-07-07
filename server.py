@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import asyncio
+import re
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs, urlparse
 
@@ -93,6 +94,120 @@ def alpaca_headers() -> dict[str, str]:
 
 def account_currency_fallback() -> str:
     return os.getenv("ACCOUNT_CURRENCY", "USD").strip().upper() or "USD"
+
+
+POSITIVE_NEWS_TERMS = {
+    "beat": 2,
+    "beats": 2,
+    "upgrade": 2,
+    "upgraded": 2,
+    "raises": 2,
+    "raised": 2,
+    "surge": 2,
+    "surges": 2,
+    "jump": 2,
+    "jumps": 2,
+    "rally": 2,
+    "rallies": 2,
+    "gain": 1,
+    "gains": 1,
+    "profit": 1,
+    "profits": 1,
+    "growth": 1,
+    "record": 1,
+    "strong": 1,
+    "bullish": 2,
+    "buy": 1,
+    "outperform": 2,
+    "breakthrough": 2,
+    "approval": 2,
+    "approved": 2,
+    "deal": 1,
+    "merger": 1,
+    "acquire": 1,
+    "dividend": 1,
+    "buyback": 2,
+    "guidance raised": 3,
+    "price target raised": 3,
+}
+
+
+NEGATIVE_NEWS_TERMS = {
+    "miss": 2,
+    "misses": 2,
+    "downgrade": 2,
+    "downgraded": 2,
+    "cuts": 2,
+    "cut": 1,
+    "falls": 2,
+    "fall": 2,
+    "drops": 2,
+    "drop": 2,
+    "plunge": 3,
+    "plunges": 3,
+    "slump": 2,
+    "slumps": 2,
+    "loss": 2,
+    "losses": 2,
+    "weak": 1,
+    "bearish": 2,
+    "sell": 1,
+    "underperform": 2,
+    "lawsuit": 2,
+    "probe": 2,
+    "investigation": 2,
+    "recall": 2,
+    "delay": 1,
+    "delayed": 1,
+    "risk": 1,
+    "warning": 2,
+    "bankruptcy": 3,
+    "fraud": 3,
+    "guidance cut": 3,
+    "price target cut": 3,
+}
+
+
+def analyze_news_sentiment(*parts: object) -> dict[str, object]:
+    text = " ".join(str(part or "") for part in parts).lower()
+    tokens = set(re.findall(r"[a-z0-9]+", text))
+
+    positive_hits: list[str] = []
+    negative_hits: list[str] = []
+    score = 0
+
+    for term, weight in POSITIVE_NEWS_TERMS.items():
+        matched = term in text if " " in term else term in tokens
+        if matched:
+            positive_hits.append(term)
+            score += weight
+    for term, weight in NEGATIVE_NEWS_TERMS.items():
+        matched = term in text if " " in term else term in tokens
+        if matched:
+            negative_hits.append(term)
+            score -= weight
+
+    if score >= 2:
+        label = "positive"
+    elif score <= -2:
+        label = "negative"
+    else:
+        label = "neutral"
+
+    reason_parts = []
+    if positive_hits:
+        reason_parts.append("Positive: " + ", ".join(positive_hits[:4]))
+    if negative_hits:
+        reason_parts.append("Negative: " + ", ".join(negative_hits[:4]))
+    reason = "; ".join(reason_parts) if reason_parts else "No strong directional keyword signal."
+
+    confidence = 0.5 if score == 0 else min(0.95, 0.5 + min(abs(score), 6) * 0.075)
+    return {
+        "sentiment_label": label,
+        "sentiment_score": score,
+        "sentiment_confidence": round(confidence, 2),
+        "sentiment_reason": reason,
+    }
 
 
 MARKET_GROUPS: dict[str, list[dict[str, str]]] = {
@@ -835,6 +950,11 @@ async def alpaca_news(
         item_symbols = [str(symbol).upper() for symbol in item.get("symbols", [])]
         for symbol in item_symbols:
             ticker_counts[symbol] = ticker_counts.get(symbol, 0) + 1
+        sentiment = analyze_news_sentiment(
+            item.get("headline"),
+            item.get("summary"),
+            " ".join(item_symbols),
+        )
         articles.append(
             {
                 "headline": item.get("headline"),
@@ -843,6 +963,7 @@ async def alpaca_news(
                 "created_at": item.get("created_at"),
                 "symbols": item_symbols,
                 "summary": item.get("summary"),
+                **sentiment,
             }
         )
 
@@ -953,13 +1074,19 @@ async def newsdata_latest(
 
     articles = []
     for item in data.get("results", [])[:size]:
+        sentiment = analyze_news_sentiment(
+            item.get("title"),
+            item.get("description"),
+            item.get("source_name") or item.get("source_id"),
+        )
         articles.append(
             {
                 "title": item.get("title"),
                 "source": item.get("source_name") or item.get("source_id"),
                 "link": item.get("link"),
                 "published": item.get("pubDate"),
-                "sentiment": item.get("sentiment"),
+                "provider_sentiment": item.get("sentiment"),
+                **sentiment,
             }
         )
 

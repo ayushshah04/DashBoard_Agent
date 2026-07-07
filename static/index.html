@@ -291,11 +291,11 @@
     .dock-panel.active { display: flex; }
     .panel-tabs {
       display: grid;
-      grid-template-columns: repeat(6, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 6px;
     }
     .panel-tabs button {
-      min-height: 34px;
+      min-height: 40px;
       padding: 6px 8px;
       font-size: 11px;
       color: var(--muted);
@@ -333,6 +333,34 @@
     .pill.hot { color: var(--green); border-color: rgba(93, 240, 176, 0.28); }
     .pill.warn { color: var(--amber); border-color: rgba(255, 200, 107, 0.3); }
     .pill a { color: var(--cyan); text-decoration: none; }
+    .sentiment-badge {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      border-radius: 999px;
+      padding: 3px 8px;
+      margin-top: 6px;
+      font-size: 10px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      border: 1px solid rgba(115, 220, 255, 0.22);
+    }
+    .sentiment-positive {
+      color: var(--green);
+      border-color: rgba(93, 240, 176, 0.38);
+      background: rgba(10, 39, 32, 0.42);
+    }
+    .sentiment-negative {
+      color: var(--red);
+      border-color: rgba(255, 115, 115, 0.38);
+      background: rgba(40, 8, 12, 0.42);
+    }
+    .sentiment-neutral {
+      color: var(--amber);
+      border-color: rgba(255, 200, 107, 0.34);
+      background: rgba(38, 29, 10, 0.36);
+    }
     .pill small {
       display: block;
       color: var(--muted);
@@ -1581,6 +1609,23 @@
       return articles.filter((article) => terms.some((term) => headlineText(article).includes(term))).length;
     }
 
+    function sentimentClass(label) {
+      if (label === "positive") return "sentiment-positive";
+      if (label === "negative") return "sentiment-negative";
+      return "sentiment-neutral";
+    }
+
+    function addSentimentBadge(container, item) {
+      const label = item.sentiment_label || "neutral";
+      const badge = document.createElement("span");
+      badge.className = `sentiment-badge ${sentimentClass(label)}`;
+      badge.textContent = `${label} | score ${item.sentiment_score ?? 0} | ${Math.round((item.sentiment_confidence || 0.5) * 100)}%`;
+      container.appendChild(badge);
+      const reason = document.createElement("small");
+      reason.textContent = item.sentiment_reason || "No sentiment reason returned.";
+      container.appendChild(reason);
+    }
+
     function renderNewsFactors(data) {
       newsFactors.innerHTML = "";
       const articles = data.results || [];
@@ -1615,6 +1660,16 @@
       summary.className = "pill hot";
       summary.textContent = `Live scan: ${articles.length} headlines | Total matches: ${data.total_results || "unknown"} | Latest: ${latest || "unknown"}`;
       newsFactors.appendChild(summary);
+
+      const sentimentCounts = articles.reduce((counts, article) => {
+        const label = article.sentiment_label || "neutral";
+        counts[label] = (counts[label] || 0) + 1;
+        return counts;
+      }, {});
+      const sentimentPill = document.createElement("div");
+      sentimentPill.className = "pill";
+      sentimentPill.textContent = `Sentiment: ${sentimentCounts.positive || 0} positive | ${sentimentCounts.neutral || 0} neutral | ${sentimentCounts.negative || 0} negative`;
+      newsFactors.appendChild(sentimentPill);
 
       if (topSources) {
         const sourcePill = document.createElement("div");
@@ -1675,9 +1730,10 @@
           link.rel = "noreferrer";
           link.textContent = article.title || "Untitled headline";
           const meta = document.createElement("small");
-          meta.textContent = [article.source, article.published, article.sentiment].filter(Boolean).join(" | ");
+          meta.textContent = [article.source, article.published].filter(Boolean).join(" | ");
           div.appendChild(link);
           div.appendChild(meta);
+          addSentimentBadge(div, article);
           newsDataFeed.appendChild(div);
         });
       } catch (error) {
@@ -1753,6 +1809,7 @@
           const tickers = document.createElement("small");
           tickers.textContent = `Affects: ${(article.symbols || []).join(", ") || "unknown"}`;
           div.append(link, meta, tickers);
+          addSentimentBadge(div, article);
           alpacaNewsFeed.appendChild(div);
         });
       } catch (error) {
