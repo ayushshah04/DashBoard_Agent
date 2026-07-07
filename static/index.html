@@ -174,7 +174,7 @@
     }
     main {
       display: grid;
-      grid-template-rows: auto auto auto auto auto 1fr auto;
+      grid-template-rows: auto auto auto auto auto auto 1fr auto;
       min-width: 0;
       overflow: hidden;
     }
@@ -234,6 +234,48 @@
       overflow-wrap: anywhere;
       color: var(--text);
       font-size: 13px;
+    }
+    .trade-actions {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(10, 39, 32, 0.22);
+    }
+    .trade-action-copy {
+      min-width: 0;
+    }
+    .trade-action-copy span {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 3px;
+    }
+    .trade-action-copy strong {
+      display: block;
+      color: var(--green);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .trade-action-buttons {
+      display: grid;
+      grid-template-columns: repeat(3, auto);
+      gap: 6px;
+    }
+    .trade-action-buttons button {
+      min-height: 34px;
+      padding: 6px 9px;
+      font-size: 11px;
+      white-space: nowrap;
+    }
+    .trade-action-buttons button.scout-on {
+      color: var(--amber);
+      border-color: rgba(255, 200, 107, 0.42);
+      background: rgba(38, 29, 10, 0.48);
     }
     .bubble {
       max-width: 900px;
@@ -686,6 +728,9 @@
       .mover-grid { grid-template-columns: 1fr; }
       .mover-row { grid-template-columns: 1.2fr 0.8fr 0.8fr; }
       .mover-meta { text-align: left; }
+      .trade-actions { grid-template-columns: 1fr; }
+      .trade-action-buttons { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .trade-action-buttons button { white-space: normal; }
       .vault-fields { grid-template-columns: 1fr; }
       form { grid-template-columns: 1fr; }
       button { min-height: 46px; }
@@ -772,6 +817,17 @@
         <div class="control"><span>Risk</span><strong id="risk">Loading</strong></div>
         <div class="control"><span>Order Tools</span><strong id="orderTools">Loading</strong></div>
         <div class="control"><span>Robinhood MCP</span><strong id="robinhoodStatus">Disabled</strong></div>
+      </div>
+      <div class="trade-actions">
+        <div class="trade-action-copy">
+          <span>Trade Action Center</span>
+          <strong id="tradeActionStatus">Waiting for research result</strong>
+        </div>
+        <div class="trade-action-buttons">
+          <button id="buildTradeTicket" type="button">Trade Ticket</button>
+          <button id="executePaperTrade" type="button">Execute Paper</button>
+          <button id="continuousScout" type="button">Start Scout</button>
+        </div>
       </div>
       <div class="feed" id="feed"></div>
       <form id="form">
@@ -921,6 +977,10 @@
     const risk = document.querySelector("#risk");
     const orderTools = document.querySelector("#orderTools");
     const robinhoodStatus = document.querySelector("#robinhoodStatus");
+    const tradeActionStatus = document.querySelector("#tradeActionStatus");
+    const buildTradeTicket = document.querySelector("#buildTradeTicket");
+    const executePaperTrade = document.querySelector("#executePaperTrade");
+    const continuousScout = document.querySelector("#continuousScout");
     const newsFactors = document.querySelector("#newsFactors");
     const newsDataFeed = document.querySelector("#newsDataFeed");
     const refreshNewsdata = document.querySelector("#refreshNewsdata");
@@ -957,10 +1017,16 @@
     const dockPanels = Array.from(document.querySelectorAll(".dock-panel"));
 
     let socket;
+    let agentBusy = false;
     let marketOverview = {};
     let activeMarketGroup = "US";
     let marketMovers = {};
     let activeMoverGroup = "US";
+    let tradingConfigCache = {};
+    let latestAgentResult = "";
+    let latestTradeCycle = 0;
+    let continuousScoutTimer = null;
+    const continuousScoutIntervalMs = 300000;
     const watchlistKey = "jarvis-watchlist-v1";
     let watchedTickers = [];
     let selectedTicker = "TSLA";
@@ -979,6 +1045,30 @@
       div.className = `pill ${hot ? "hot" : ""}`;
       div.textContent = text;
       activityEl.prepend(div);
+    }
+
+    function compactAgentContext(text) {
+      return (text || "").trim().slice(-5000);
+    }
+
+    function updateTradeActionState() {
+      const hasResult = Boolean(latestAgentResult);
+      buildTradeTicket.disabled = !hasResult;
+      executePaperTrade.disabled = !hasResult;
+      continuousScout.textContent = continuousScoutTimer ? "Stop Scout" : "Start Scout";
+      continuousScout.classList.toggle("scout-on", Boolean(continuousScoutTimer));
+      const mode = Object.keys(tradingConfigCache).length
+        ? (tradingConfigCache.paper ? "paper" : (tradingConfigCache.live_trading_enabled ? "live unlocked" : "live locked"))
+        : "mode loading";
+      const scout = continuousScoutTimer ? `scout on | every ${Math.round(continuousScoutIntervalMs / 60000)}m` : "scout off";
+      tradeActionStatus.textContent = `${hasResult ? "Last result ready" : "Waiting for research result"} | ${mode} | ${scout}`;
+    }
+
+    function rememberAgentResult(text) {
+      const clean = compactAgentContext(text);
+      if (!clean || clean.length < 20) return;
+      latestAgentResult = clean;
+      updateTradeActionState();
     }
 
     function renderRegistry(msg) {
@@ -1553,6 +1643,7 @@
         fetch("/api/trading/config").then((res) => res.json()),
         fetch("/api/trading/prompts").then((res) => res.json()),
       ]);
+      tradingConfigCache = config;
       tradeMode.textContent = config.paper ? "Paper-safe" : (config.live_trading_enabled ? "Live unlocked" : "Live locked");
       accountCurrency.textContent = config.currency || "USD";
       markets.textContent = config.markets.join(", ");
@@ -1613,6 +1704,7 @@
         div.textContent = "Set NEWS_VIDEO_URLS to YouTube or embeddable live news stream URLs.";
         videoSlot.appendChild(div);
       }
+      updateTradeActionState();
     }
 
     async function loadMcpRegistry() {
@@ -1994,6 +2086,104 @@ Use these links plus Alpaca market data, Alpaca news, Newsdata.io, the Research 
       promptBox.focus();
     }
 
+    function marketScopeText() {
+      return (tradingConfigCache.markets || ["equities", "crypto", "currency"]).join(", ");
+    }
+
+    function riskText() {
+      const riskConfig = tradingConfigCache.risk || {};
+      return `max order notional $${riskConfig.max_order_notional_usd || "50"}, max position $${riskConfig.max_position_usd || "100"}, max daily loss $${riskConfig.max_daily_loss_usd || "250"}, max option contracts ${riskConfig.options_max_contracts || "1"}`;
+    }
+
+    function watchlistText() {
+      return watchedTickers.length ? watchedTickers.join(", ") : "TSLA, NVDA, SPY";
+    }
+
+    function latestResultBlock() {
+      return latestAgentResult || "No prior research result captured. Start from live market movers, watchlist, Alpaca news, Newsdata.io, and account risk.";
+    }
+
+    function buildTradeTicketPrompt() {
+      return `Create an execution-ready trade ticket from the latest research/search result below.
+
+Markets allowed: ${marketScopeText()}
+Watchlist: ${watchlistText()}
+Risk limits: ${riskText()}
+
+Return one best candidate only. Include symbol, asset class, direction, entry style, order type, notional/quantity, time horizon, stop or invalidation, profit/risk target, news risk, options risk if relevant, and a clear EXECUTE / SKIP decision.
+
+Do not place an order in this step.
+
+Latest research/search result:
+${latestResultBlock()}`;
+    }
+
+    function executePaperTradePrompt() {
+      return `This button click is my explicit instruction to execute a paper trade if the backend exposes paper order tools.
+
+Use the latest research/search result below as the candidate context. Check Alpaca account funds, current quote/snapshot, market movers, Alpaca news, Newsdata.io sentiment, and existing exposure before acting.
+
+Rules:
+- Paper trading only unless the backend is already explicitly live-unlocked.
+- If live mode is active, do not auto-execute; return the exact trade ticket instead.
+- If order tools are locked or missing, do not execute; return the trade ticket and explain what is missing.
+- Place at most one small paper order only if the setup is liquid, risk-compliant, and high confidence.
+- Respect ${riskText()}.
+- Avoid options orders unless explicitly unlocked and the strategy has defined max loss.
+- If conditions are weak, skip the trade.
+
+Latest research/search result:
+${latestResultBlock()}`;
+    }
+
+    function continuousScoutPrompt() {
+      latestTradeCycle += 1;
+      return `Continuous Trade Scout cycle ${latestTradeCycle}.
+
+Scan all configured markets (${marketScopeText()}) plus watchlist (${watchlistText()}) using market movers, snapshots, account exposure, Alpaca news, Newsdata.io sentiment, Research Vault context, company/earnings catalysts if available, and options risk if relevant.
+
+Find the best risk-adjusted trade candidate across equities, crypto, and currency. If paper trading tools are available, you may place at most one small paper trade only when the setup is strong, liquid, and within ${riskText()}. If live trading is unlocked, do not auto-execute from this continuous scout; return a trade ticket instead. If no setup is good, do nothing and explain the skip.
+
+Return: cycle number, scanned universe, chosen candidate, execute/skip decision, order details if paper-executed, risk controls, and next watch condition.`;
+    }
+
+    function submitAgentPrompt(prompt, label = "Submitted prompt") {
+      const clean = prompt.trim();
+      if (!clean) return false;
+      if (agentBusy) {
+        addActivity(`${label} skipped: agent is still running.`);
+        return false;
+      }
+      promptBox.value = clean;
+      if (!socket || socket.readyState !== WebSocket.OPEN) connect();
+      addBubble(clean, "user");
+      send.disabled = true;
+      agentBusy = true;
+      const sendPayload = () => socket.send(JSON.stringify({ prompt: clean }));
+      if (socket.readyState === WebSocket.OPEN) sendPayload();
+      else socket.addEventListener("open", sendPayload, { once: true });
+      addActivity(label, true);
+      return true;
+    }
+
+    function runContinuousScoutCycle() {
+      submitAgentPrompt(continuousScoutPrompt(), `Continuous scout cycle ${latestTradeCycle + 1}`);
+    }
+
+    function toggleContinuousScout() {
+      if (continuousScoutTimer) {
+        clearInterval(continuousScoutTimer);
+        continuousScoutTimer = null;
+        addActivity("Continuous trade scout stopped.");
+        updateTradeActionState();
+        return;
+      }
+      runContinuousScoutCycle();
+      continuousScoutTimer = setInterval(runContinuousScoutCycle, continuousScoutIntervalMs);
+      addActivity("Continuous trade scout started.", true);
+      updateTradeActionState();
+    }
+
     function connect() {
       const protocol = location.protocol === "https:" ? "wss" : "ws";
       socket = new WebSocket(`${protocol}://${location.host}/ws/agent`);
@@ -2003,10 +2193,14 @@ Use these links plus Alpaca market data, Alpaca news, Newsdata.io, the Research 
       socket.onclose = () => {
         statusEl.textContent = "Disconnected";
         send.disabled = false;
+        agentBusy = false;
+        updateTradeActionState();
       };
       socket.onerror = () => {
         statusEl.textContent = "Socket error";
         send.disabled = false;
+        agentBusy = false;
+        updateTradeActionState();
       };
       socket.onmessage = (event) => {
         const msg = JSON.parse(event.data);
@@ -2014,12 +2208,14 @@ Use these links plus Alpaca market data, Alpaca news, Newsdata.io, the Research 
           renderRegistry(msg);
         } else if (msg.type === "assistant_text") {
           addBubble(msg.text);
+          rememberAgentResult(msg.text);
         } else if (msg.type === "tool_call") {
           addBubble(`${msg.name}\n${JSON.stringify(msg.input, null, 2)}`, "tool");
           addActivity(`Calling ${msg.name}`, true);
         } else if (msg.type === "tool_result") {
           addBubble(`${msg.name} result\n${msg.output}`, "tool");
           addActivity(`Result from ${msg.name}`);
+          rememberAgentResult(`${msg.name} result\n${msg.output}`);
         } else if (msg.type === "thinking" || msg.type === "status") {
           statusEl.textContent = msg.message;
           addActivity(msg.message);
@@ -2030,23 +2226,20 @@ Use these links plus Alpaca market data, Alpaca news, Newsdata.io, the Research 
           statusEl.textContent = "Error";
           addBubble(msg.error, "tool");
           send.disabled = false;
+          agentBusy = false;
+          updateTradeActionState();
         } else if (msg.type === "done") {
           statusEl.textContent = msg.warning || "Done";
           send.disabled = false;
+          agentBusy = false;
+          updateTradeActionState();
         }
       };
     }
 
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      const prompt = promptBox.value.trim();
-      if (!prompt) return;
-      if (!socket || socket.readyState !== WebSocket.OPEN) connect();
-      addBubble(prompt, "user");
-      send.disabled = true;
-      const sendPayload = () => socket.send(JSON.stringify({ prompt }));
-      if (socket.readyState === WebSocket.OPEN) sendPayload();
-      else socket.addEventListener("open", sendPayload, { once: true });
+      submitAgentPrompt(promptBox.value, "Manual prompt submitted");
     });
 
     addTicker.addEventListener("click", () => addTickerToWatchlist(tickerInput.value));
@@ -2058,6 +2251,13 @@ Use these links plus Alpaca market data, Alpaca news, Newsdata.io, the Research 
     });
     watchNews.addEventListener("click", openWatchedNews);
     watchOptions.addEventListener("click", prepareOptionsOverview);
+    buildTradeTicket.addEventListener("click", () => {
+      submitAgentPrompt(buildTradeTicketPrompt(), "Trade ticket requested");
+    });
+    executePaperTrade.addEventListener("click", () => {
+      submitAgentPrompt(executePaperTradePrompt(), "Paper trade execution requested");
+    });
+    continuousScout.addEventListener("click", toggleContinuousScout);
     analyzeOptions.addEventListener("click", prepareOptionsOverview);
     optionsTicker.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -2081,6 +2281,7 @@ Use these links plus Alpaca market data, Alpaca news, Newsdata.io, the Research 
     });
 
     promptBox.value = "Build a Python prime checker, save it as prime.py, and test it with 97.";
+    updateTradeActionState();
     loadStoredWatchlist();
     setSelectedTicker(selectedTicker);
     renderOptionsPrompts();

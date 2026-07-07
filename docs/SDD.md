@@ -437,6 +437,7 @@ It does not require a frontend build system.
 | Fund strip | Portfolio, buying power, cash, equity, account status |
 | Market board | Market Pulse tabs and snapshots |
 | Mover board | Top, bottom, active, unusual volume |
+| Trade Action Center | Latest-result trade ticket, paper execution, continuous scout controls |
 | Chat feed | User prompts, assistant messages, tool events |
 | Right tabs | Tools, Activity, News, Research, Vault, Video |
 
@@ -462,6 +463,8 @@ Several calls repeat on intervals:
 - Market movers every 180 seconds.
 - Newsdata every 300 seconds.
 
+The Trade Action Center also has an optional continuous scout interval. When enabled, it submits one scout cycle immediately and then every five minutes. If an agent run is still busy when the next cycle fires, that cycle is skipped instead of stacking concurrent WebSocket requests.
+
 ### 10.3 WebSocket Rendering
 
 The browser opens:
@@ -482,6 +485,18 @@ Then it handles message types:
 | `warning` | Add warning bubble/activity |
 | `error` | Set status to error |
 | `done` | Set final status |
+
+### 10.4 Trade Action Center Logic
+
+The frontend keeps `latestAgentResult`, which is updated from `assistant_text` and `tool_result` WebSocket messages. The three trade action buttons use that context:
+
+- `buildTradeTicketPrompt()` creates a ticket-only prompt.
+- `executePaperTradePrompt()` creates a one-click paper execution prompt with risk constraints.
+- `continuousScoutPrompt()` creates a recurring market-scanning prompt.
+
+`submitAgentPrompt()` centralizes prompt submission for the normal form and the trade buttons. It uses `agentBusy` to prevent overlapping runs.
+
+Live trading remains guarded by `agent.py`; the frontend prompts also tell the agent not to auto-execute live orders from the continuous scout.
 
 ## 11. End-to-End Agent Sequence
 

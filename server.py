@@ -595,6 +595,19 @@ async def trading_prompts() -> dict[str, str]:
             f"${risk['max_order_notional_usd']} and max position ${risk['max_position_usd']}, "
             "then place only one small paper trade if the setup is strong. Explain every tool call."
         ),
+        "trade_ticket": (
+            f"Screen {markets}, use account exposure, market movers, snapshots, Alpaca news, Newsdata.io, "
+            f"Research Vault context, and risk limits. Return one execution-ready trade ticket only: symbol, "
+            f"asset class, direction, order type, notional/quantity, entry, stop/invalidation, profit/risk target, "
+            f"news risk, and EXECUTE/SKIP decision. Do not place orders."
+        ),
+        "continuous_paper_scout": (
+            f"Run one continuous-scout cycle across {markets}. Use market movers, snapshots, watchlist context, "
+            f"Alpaca news, Newsdata.io sentiment, account exposure, and risk limits. If paper trading tools are "
+            f"available, place at most one small paper order only when the setup is strong and within max order "
+            f"notional ${risk['max_order_notional_usd']}. If live mode is active, do not auto-execute; return a "
+            f"trade ticket instead."
+        ),
         "live_guarded": (
             f"If and only if live trading is unlocked by the backend, screen {markets}, check news and account risk, "
             f"respect max order notional ${risk['max_order_notional_usd']}, max position ${risk['max_position_usd']}, "

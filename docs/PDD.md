@@ -121,6 +121,16 @@ The main feed lets the user send prompts to the AI agent. The agent can:
 
 Tool calls and tool results stream back to the UI.
 
+### 7.5.1 Trade Action Center
+
+The Trade Action Center sits under the market/risk cockpit. It captures the latest agent research result and exposes three direct actions:
+
+- `Trade Ticket`: turn the latest result into an execution-ready trade ticket without placing an order.
+- `Execute Paper`: use the latest result to execute at most one small paper trade if paper order tools are available and the setup passes risk checks.
+- `Start Scout` / `Stop Scout`: run a continuous paper scout every five minutes to scan configured markets and watchlist names for the best risk-adjusted setup.
+
+The continuous scout is designed for paper automation. If the system is in live mode, it returns a trade ticket instead of silently placing live orders.
+
 ### 7.6 Tools Panel
 
 The Tools tab shows the MCP tools available to the agent. This helps the user confirm whether workspace, Alpaca, Newsdata, Robinhood, or Research Vault tools are connected.
@@ -250,6 +260,7 @@ flowchart TD
 | PDD-FR-008 | Store research notes | `research_vault.py` SQLite database |
 | PDD-FR-009 | Scan company websites | `website_scan.py` |
 | PDD-FR-010 | Keep live trading locked | Agent filters risky tool names unless unlock flags are set |
+| PDD-FR-011 | Provide trade action buttons | Trade Action Center turns research results into tickets, paper orders, or continuous paper scout cycles |
 
 ## 11. Non-Functional Requirements
 
@@ -298,4 +309,3 @@ The UI and prompts repeatedly say not to place orders unless the user explicitly
 - Add deeper valuation templates for long-term investing.
 - Add a safer live-trade approval modal with order preview and explicit confirmation.
 - Add export to PDF or DOCX for research reports.
-

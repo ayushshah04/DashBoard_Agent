@@ -98,6 +98,14 @@ The dashboard shows current Alpaca funds from `/v2/account`: cash, buying power,
 
 The dashboard exposes live/paper status, risk limits, market scope, a news-factor screen, and an optional `NEWS_VIDEO_URL` iframe. Use only legal embeddable video URLs from your news provider.
 
+The Trade Action Center captures the latest agent research result and lets you:
+
+- Build an execution-ready trade ticket.
+- Execute one small paper trade when paper order tools are available and risk checks pass.
+- Start or stop a continuous paper scout that scans markets every five minutes.
+
+The continuous scout does not auto-execute live trades. In live mode it prepares a trade ticket unless live tools are explicitly unlocked and the user sends a direct execution request.
+
 For multiple YouTube or news feeds, use comma-separated URLs:
 
 ```bash
