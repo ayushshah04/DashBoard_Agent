@@ -174,7 +174,7 @@
     }
     main {
       display: grid;
-      grid-template-rows: auto auto auto auto auto auto 1fr auto;
+      grid-template-rows: auto auto auto auto auto auto auto 1fr auto;
       min-width: 0;
       overflow: hidden;
     }
@@ -276,6 +276,76 @@
       color: var(--amber);
       border-color: rgba(255, 200, 107, 0.42);
       background: rgba(38, 29, 10, 0.48);
+    }
+    .trade-board {
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
+      gap: 6px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(5, 7, 10, 0.36);
+      min-height: 92px;
+    }
+    .trade-board-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: center;
+    }
+    .trade-board-head span {
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .trade-board-head strong {
+      color: var(--cyan);
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+    .trade-board-rows {
+      display: grid;
+      gap: 4px;
+      min-height: 0;
+      overflow: auto;
+    }
+    .trade-row {
+      display: grid;
+      grid-template-columns: minmax(72px, 0.8fr) minmax(78px, 0.8fr) repeat(4, minmax(70px, 0.7fr)) minmax(100px, 1fr);
+      gap: 6px;
+      align-items: center;
+      min-height: 28px;
+      padding: 5px 6px;
+      border: 1px solid rgba(115, 220, 255, 0.14);
+      border-radius: 8px;
+      background: rgba(7, 16, 20, 0.66);
+      color: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    .trade-row.header {
+      min-height: 22px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      font-size: 9px;
+      background: rgba(16, 26, 33, 0.52);
+    }
+    .trade-row.hot {
+      border-color: rgba(93, 240, 176, 0.3);
+      color: var(--green);
+    }
+    .trade-row.warn {
+      border-color: rgba(255, 200, 107, 0.28);
+      color: var(--amber);
+    }
+    .trade-row span {
+      overflow-wrap: anywhere;
+      min-width: 0;
+    }
+    .trade-row .trade-symbol {
+      color: var(--cyan);
+      font-weight: 800;
     }
     .bubble {
       max-width: 900px;
@@ -731,6 +801,7 @@
       .trade-actions { grid-template-columns: 1fr; }
       .trade-action-buttons { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .trade-action-buttons button { white-space: normal; }
+      .trade-row { grid-template-columns: 1fr 1fr 1fr; }
       .vault-fields { grid-template-columns: 1fr; }
       form { grid-template-columns: 1fr; }
       button { min-height: 46px; }
@@ -828,6 +899,13 @@
           <button id="executePaperTrade" type="button">Execute Paper</button>
           <button id="continuousScout" type="button">Start Scout</button>
         </div>
+      </div>
+      <div class="trade-board">
+        <div class="trade-board-head">
+          <span>Trade Board</span>
+          <strong id="tradeBoardStatus">No trade tickets yet</strong>
+        </div>
+        <div class="trade-board-rows" id="tradeBoardRows"></div>
       </div>
       <div class="feed" id="feed"></div>
       <form id="form">
@@ -981,6 +1059,8 @@
     const buildTradeTicket = document.querySelector("#buildTradeTicket");
     const executePaperTrade = document.querySelector("#executePaperTrade");
     const continuousScout = document.querySelector("#continuousScout");
+    const tradeBoardStatus = document.querySelector("#tradeBoardStatus");
+    const tradeBoardRows = document.querySelector("#tradeBoardRows");
     const newsFactors = document.querySelector("#newsFactors");
     const newsDataFeed = document.querySelector("#newsDataFeed");
     const refreshNewsdata = document.querySelector("#refreshNewsdata");
@@ -1028,9 +1108,12 @@
     let continuousScoutTimer = null;
     const continuousScoutIntervalMs = 300000;
     const watchlistKey = "jarvis-watchlist-v1";
+    const tradeRecordsKey = "jarvis-trade-records-v1";
     let watchedTickers = [];
     let selectedTicker = "TSLA";
     let watchSnapshotItems = [];
+    let tradeRecords = [];
+    let pendingTradeRecordId = null;
 
     function addBubble(text, kind = "") {
       const div = document.createElement("div");
@@ -1053,8 +1136,8 @@
 
     function updateTradeActionState() {
       const hasResult = Boolean(latestAgentResult);
-      buildTradeTicket.disabled = !hasResult;
-      executePaperTrade.disabled = !hasResult;
+      buildTradeTicket.disabled = agentBusy;
+      executePaperTrade.disabled = agentBusy;
       continuousScout.textContent = continuousScoutTimer ? "Stop Scout" : "Start Scout";
       continuousScout.classList.toggle("scout-on", Boolean(continuousScoutTimer));
       const mode = Object.keys(tradingConfigCache).length
@@ -1064,10 +1147,171 @@
       tradeActionStatus.textContent = `${hasResult ? "Last result ready" : "Waiting for research result"} | ${mode} | ${scout}`;
     }
 
+    function tradeRecordClass(status) {
+      const value = (status || "").toLowerCase();
+      if (value.includes("executed") || value.includes("filled") || value.includes("submitted")) return "hot";
+      if (value.includes("skip") || value.includes("rejected") || value.includes("blocked")) return "warn";
+      return "";
+    }
+
+    function saveTradeRecords() {
+      localStorage.setItem(tradeRecordsKey, JSON.stringify(tradeRecords.slice(0, 12)));
+    }
+
+    function loadTradeRecords() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(tradeRecordsKey) || "[]");
+        tradeRecords = Array.isArray(parsed) ? parsed : [];
+      } catch {
+        tradeRecords = [];
+      }
+    }
+
+    function renderTradeBoard() {
+      tradeBoardRows.innerHTML = "";
+      tradeBoardStatus.textContent = tradeRecords.length
+        ? `${tradeRecords.length} ticket${tradeRecords.length === 1 ? "" : "s"} tracked`
+        : "No trade tickets yet";
+
+      const header = document.createElement("div");
+      header.className = "trade-row header";
+      ["Symbol", "Status", "Entry", "Exit/Target", "Stop", "Size", "Updated"].forEach((label) => {
+        const span = document.createElement("span");
+        span.textContent = label;
+        header.appendChild(span);
+      });
+      tradeBoardRows.appendChild(header);
+
+      if (!tradeRecords.length) {
+        const empty = document.createElement("div");
+        empty.className = "trade-row warn";
+        ["--", "Waiting", "--", "--", "--", "--", "Run Trade Ticket or Execute Paper"].forEach((value) => {
+          const span = document.createElement("span");
+          span.textContent = value;
+          empty.appendChild(span);
+        });
+        tradeBoardRows.appendChild(empty);
+        return;
+      }
+
+      tradeRecords.slice(0, 8).forEach((record) => {
+        const row = document.createElement("div");
+        row.className = `trade-row ${tradeRecordClass(record.status)}`;
+        [
+          record.symbol || "--",
+          record.status || "--",
+          record.entry || "--",
+          record.exitTarget || "--",
+          record.stop || "--",
+          record.size || "--",
+          record.updatedAt || record.createdAt || "--",
+        ].forEach((value, index) => {
+          const span = document.createElement("span");
+          span.className = index === 0 ? "trade-symbol" : "";
+          span.textContent = value;
+          row.appendChild(span);
+        });
+        row.title = record.reason || record.source || "";
+        tradeBoardRows.appendChild(row);
+      });
+    }
+
+    function makeTradeRecord(kind, prompt) {
+      const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const record = {
+        id: Date.now(),
+        kind,
+        status: kind === "Paper" ? "Paper requested" : kind === "Scout" ? "Scout running" : "Ticket requested",
+        symbol: currentTicker(),
+        direction: "--",
+        entry: "--",
+        exitTarget: "--",
+        stop: "--",
+        size: "--",
+        orderId: "",
+        reason: "",
+        source: compactAgentContext(prompt),
+        createdAt: now,
+        updatedAt: now,
+      };
+      tradeRecords.unshift(record);
+      tradeRecords = tradeRecords.slice(0, 12);
+      pendingTradeRecordId = record.id;
+      saveTradeRecords();
+      renderTradeBoard();
+      return record.id;
+    }
+
+    function fieldFromText(text, labels) {
+      for (const label of labels) {
+        const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const match = text.match(new RegExp(`(?:^|\\n)\\s*${escaped}\\s*[:\\-]\\s*([^\\n]+)`, "i"));
+        if (match && match[1]) return match[1].trim().slice(0, 80);
+      }
+      return "";
+    }
+
+    function inferTradeStatus(text) {
+      const lower = text.toLowerCase();
+      if (lower.includes("order submitted") || lower.includes("filled") || lower.includes("executed") || lower.includes("paper order")) return "Executed paper";
+      if (lower.includes("skip") || lower.includes("do nothing") || lower.includes("no trade") || lower.includes("not execute")) return "Skipped";
+      if (lower.includes("blocked") || lower.includes("locked") || lower.includes("missing")) return "Blocked";
+      return "Ticket ready";
+    }
+
+    function parseTradeRecord(text) {
+      const blockMatch = text.match(/TRADE_RECORD([\s\S]*?)(?:END_TRADE_RECORD|$)/i);
+      const source = blockMatch ? blockMatch[1] : text;
+      const symbol = fieldFromText(source, ["symbol", "ticker"]) || (source.match(/\b[A-Z]{1,5}(?:\/USD)?\b/) || [currentTicker()])[0];
+      return {
+        status: fieldFromText(source, ["status", "decision"]) || inferTradeStatus(source),
+        symbol,
+        direction: fieldFromText(source, ["direction", "side"]) || "--",
+        entry: fieldFromText(source, ["entry", "entry price", "limit price", "filled price", "average fill price"]) || "--",
+        exitTarget: fieldFromText(source, ["exit_target", "exit target", "exit", "target", "profit target", "take profit"]) || "--",
+        stop: fieldFromText(source, ["stop", "stop loss", "stop/invalidation", "invalidation"]) || "--",
+        size: fieldFromText(source, ["quantity", "qty", "notional", "size", "quantity_or_notional"]) || "--",
+        orderId: fieldFromText(source, ["order_id", "order id"]) || "",
+        reason: fieldFromText(source, ["reason", "notes", "risk"]) || source.slice(0, 220),
+      };
+    }
+
+    function updatePendingTradeRecord(text) {
+      const hasTradeShape = /TRADE_RECORD|entry|entry price|exit target|profit target|stop loss|order submitted|paper order|execute|skip/i.test(text);
+      if (!hasTradeShape) return;
+      const parsed = parseTradeRecord(text);
+      const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      let record = tradeRecords.find((item) => item.id === pendingTradeRecordId);
+      if (!record && hasTradeShape) {
+        record = {
+          id: Date.now(),
+          kind: "Detected",
+          status: "Detected",
+          symbol: currentTicker(),
+          direction: "--",
+          entry: "--",
+          exitTarget: "--",
+          stop: "--",
+          size: "--",
+          orderId: "",
+          reason: "",
+          source: "",
+          createdAt: now,
+          updatedAt: now,
+        };
+        tradeRecords.unshift(record);
+      }
+      if (!record) return;
+      Object.assign(record, parsed, { updatedAt: now });
+      saveTradeRecords();
+      renderTradeBoard();
+    }
+
     function rememberAgentResult(text) {
       const clean = compactAgentContext(text);
       if (!clean || clean.length < 20) return;
       latestAgentResult = clean;
+      updatePendingTradeRecord(clean);
       updateTradeActionState();
     }
 
@@ -2114,6 +2358,20 @@ Return one best candidate only. Include symbol, asset class, direction, entry st
 
 Do not place an order in this step.
 
+End your answer with this exact block so the dashboard can update the Trade Board:
+TRADE_RECORD
+status: Ticket ready or Skipped
+symbol:
+asset_class:
+direction:
+entry:
+exit_target:
+stop:
+quantity_or_notional:
+order_id:
+reason:
+END_TRADE_RECORD
+
 Latest research/search result:
 ${latestResultBlock()}`;
     }
@@ -2132,6 +2390,20 @@ Rules:
 - Avoid options orders unless explicitly unlocked and the strategy has defined max loss.
 - If conditions are weak, skip the trade.
 
+End your answer with this exact block so the dashboard can update the Trade Board:
+TRADE_RECORD
+status: Executed paper, Skipped, or Blocked
+symbol:
+asset_class:
+direction:
+entry:
+exit_target:
+stop:
+quantity_or_notional:
+order_id:
+reason:
+END_TRADE_RECORD
+
 Latest research/search result:
 ${latestResultBlock()}`;
     }
@@ -2144,7 +2416,21 @@ Scan all configured markets (${marketScopeText()}) plus watchlist (${watchlistTe
 
 Find the best risk-adjusted trade candidate across equities, crypto, and currency. If paper trading tools are available, you may place at most one small paper trade only when the setup is strong, liquid, and within ${riskText()}. If live trading is unlocked, do not auto-execute from this continuous scout; return a trade ticket instead. If no setup is good, do nothing and explain the skip.
 
-Return: cycle number, scanned universe, chosen candidate, execute/skip decision, order details if paper-executed, risk controls, and next watch condition.`;
+Return: cycle number, scanned universe, chosen candidate, execute/skip decision, order details if paper-executed, risk controls, and next watch condition.
+
+End your answer with this exact block so the dashboard can update the Trade Board:
+TRADE_RECORD
+status: Executed paper, Ticket ready, Skipped, or Blocked
+symbol:
+asset_class:
+direction:
+entry:
+exit_target:
+stop:
+quantity_or_notional:
+order_id:
+reason:
+END_TRADE_RECORD`;
     }
 
     function submitAgentPrompt(prompt, label = "Submitted prompt") {
@@ -2166,8 +2452,25 @@ Return: cycle number, scanned universe, chosen candidate, execute/skip decision,
       return true;
     }
 
+    function requestTradeTicket() {
+      const prompt = buildTradeTicketPrompt();
+      if (submitAgentPrompt(prompt, "Trade ticket requested")) {
+        makeTradeRecord("Ticket", prompt);
+      }
+    }
+
+    function requestPaperExecution() {
+      const prompt = executePaperTradePrompt();
+      if (submitAgentPrompt(prompt, "Paper trade execution requested")) {
+        makeTradeRecord("Paper", prompt);
+      }
+    }
+
     function runContinuousScoutCycle() {
-      submitAgentPrompt(continuousScoutPrompt(), `Continuous scout cycle ${latestTradeCycle + 1}`);
+      const prompt = continuousScoutPrompt();
+      if (submitAgentPrompt(prompt, `Continuous scout cycle ${latestTradeCycle}`)) {
+        makeTradeRecord("Scout", prompt);
+      }
     }
 
     function toggleContinuousScout() {
@@ -2251,12 +2554,8 @@ Return: cycle number, scanned universe, chosen candidate, execute/skip decision,
     });
     watchNews.addEventListener("click", openWatchedNews);
     watchOptions.addEventListener("click", prepareOptionsOverview);
-    buildTradeTicket.addEventListener("click", () => {
-      submitAgentPrompt(buildTradeTicketPrompt(), "Trade ticket requested");
-    });
-    executePaperTrade.addEventListener("click", () => {
-      submitAgentPrompt(executePaperTradePrompt(), "Paper trade execution requested");
-    });
+    buildTradeTicket.addEventListener("click", requestTradeTicket);
+    executePaperTrade.addEventListener("click", requestPaperExecution);
     continuousScout.addEventListener("click", toggleContinuousScout);
     analyzeOptions.addEventListener("click", prepareOptionsOverview);
     optionsTicker.addEventListener("keydown", (event) => {
@@ -2281,6 +2580,8 @@ Return: cycle number, scanned universe, chosen candidate, execute/skip decision,
     });
 
     promptBox.value = "Build a Python prime checker, save it as prime.py, and test it with 97.";
+    loadTradeRecords();
+    renderTradeBoard();
     updateTradeActionState();
     loadStoredWatchlist();
     setSelectedTicker(selectedTicker);

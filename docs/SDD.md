@@ -488,13 +488,15 @@ Then it handles message types:
 
 ### 10.4 Trade Action Center Logic
 
-The frontend keeps `latestAgentResult`, which is updated from `assistant_text` and `tool_result` WebSocket messages. The three trade action buttons use that context:
+The frontend keeps `latestAgentResult`, which is updated from `assistant_text` and `tool_result` WebSocket messages. The three trade action buttons use that context, or fall back to live market/watchlist context when no prior result is available:
 
 - `buildTradeTicketPrompt()` creates a ticket-only prompt.
 - `executePaperTradePrompt()` creates a one-click paper execution prompt with risk constraints.
 - `continuousScoutPrompt()` creates a recurring market-scanning prompt.
 
 `submitAgentPrompt()` centralizes prompt submission for the normal form and the trade buttons. It uses `agentBusy` to prevent overlapping runs.
+
+The Trade Board stores recent records in browser `localStorage` under `jarvis-trade-records-v1`. `makeTradeRecord()` adds a row immediately when the user requests a ticket, paper execution, or scout cycle. Agent prompts request a final `TRADE_RECORD` block with `status`, `symbol`, `asset_class`, `direction`, `entry`, `exit_target`, `stop`, `quantity_or_notional`, `order_id`, and `reason`; `updatePendingTradeRecord()` parses that block and updates the row.
 
 Live trading remains guarded by `agent.py`; the frontend prompts also tell the agent not to auto-execute live orders from the continuous scout.
 
