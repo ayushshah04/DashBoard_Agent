@@ -161,6 +161,14 @@ MOVER_WATCHLISTS: dict[str, list[str]] = {
 }
 
 
+CRYPTO_SYMBOL_ALIASES = {
+    "BTC": "BTC/USD",
+    "ETH": "ETH/USD",
+    "SOL": "SOL/USD",
+    "DOGE": "DOGE/USD",
+}
+
+
 def unique_market_symbols(kind: str) -> list[str]:
     seen: set[str] = set()
     symbols: list[str] = []
@@ -273,6 +281,18 @@ def symbol_list(value: str | None, default: str = "") -> list[str]:
             seen.add(symbol)
             symbols.append(symbol)
     return symbols
+
+
+def watch_symbol_groups(value: str | None) -> tuple[list[str], list[str]]:
+    stocks: list[str] = []
+    crypto: list[str] = []
+    for symbol in symbol_list(value, os.getenv("WATCHLIST_SYMBOLS", "TSLA,NVDA,SPY")):
+        pair = CRYPTO_SYMBOL_ALIASES.get(symbol, symbol if "/" in symbol else "")
+        if pair:
+            crypto.append(pair)
+        else:
+            stocks.append(symbol)
+    return stocks, crypto
 
 
 async def fetch_stock_snapshots(
@@ -710,6 +730,68 @@ async def markets_movers(top: int = Query(default=5, ge=3, le=10)) -> dict[str, 
         "mover_tabs": mover_tabs,
         "most_active": most_active,
         "unusual_volume": unusual_rows[:top],
+        "warnings": warnings,
+    }
+
+
+@app.get("/api/watchlist/snapshots")
+async def watchlist_snapshots(symbols: str | None = Query(default=None)) -> dict[str, object]:
+    headers = alpaca_headers()
+    requested = symbol_list(symbols, os.getenv("WATCHLIST_SYMBOLS", "TSLA,NVDA,SPY"))
+    if not headers["APCA-API-KEY-ID"] or not headers["APCA-API-SECRET-KEY"]:
+        return {
+            "configured": False,
+            "symbols": requested,
+            "items": [],
+            "message": "Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env to load watched ticker snapshots.",
+        }
+
+    data_base_url = os.getenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets").rstrip("/")
+    trading_base_url = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2").rstrip("/")
+    stock_symbols, crypto_symbols = watch_symbol_groups(",".join(requested))
+    warnings: list[str] = []
+
+    async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        stock_snapshots, asset_names = await asyncio.gather(
+            fetch_stock_snapshots(client, data_base_url, stock_symbols, warnings),
+            fetch_asset_names(client, trading_base_url, stock_symbols),
+        )
+        crypto_snapshots: dict[str, dict[str, object]] = {}
+        if crypto_symbols:
+            response = await client.get(
+                f"{data_base_url}/v1beta3/crypto/us/snapshots",
+                params={"symbols": ",".join(crypto_symbols)},
+            )
+            if response.is_error:
+                warnings.append(f"Alpaca crypto snapshots returned HTTP {response.status_code}.")
+            else:
+                crypto_snapshots = response.json().get("snapshots", {})
+
+    items: list[dict[str, object]] = []
+    for symbol in requested:
+        crypto_pair = CRYPTO_SYMBOL_ALIASES.get(symbol, symbol if "/" in symbol else "")
+        if crypto_pair:
+            payload = market_item_payload(
+                {
+                    "label": crypto_pair.split("/", 1)[0],
+                    "symbol": crypto_pair,
+                    "kind": "crypto",
+                    "href": f"https://www.cnbc.com/quotes/{crypto_pair.split('/', 1)[0]}.CM=",
+                },
+                crypto_snapshots,
+            )
+            payload["display_symbol"] = symbol
+            items.append(payload)
+        else:
+            payload = stock_snapshot_payload(symbol, stock_snapshots.get(symbol, {}), asset_names.get(symbol))
+            payload["display_symbol"] = symbol
+            items.append(payload)
+
+    return {
+        "configured": True,
+        "source": "Alpaca snapshots",
+        "symbols": requested,
+        "items": items,
         "warnings": warnings,
     }
 

@@ -86,6 +86,92 @@
     }
     .metric span { color: var(--muted); }
     .metric strong { color: var(--green); font-weight: 600; }
+    .watch-panel {
+      display: grid;
+      gap: 8px;
+      margin-top: 4px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(115, 220, 255, 0.12);
+    }
+    .watch-title {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .watch-title span {
+      color: var(--muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+    .watch-title strong {
+      color: var(--green);
+      font-size: 12px;
+    }
+    .watch-form {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+    }
+    .watch-form input {
+      min-height: 34px;
+      padding: 8px;
+      font-size: 12px;
+    }
+    .watch-form button,
+    .watch-actions button,
+    .watch-remove {
+      min-height: 34px;
+      padding: 6px 8px;
+      font-size: 11px;
+    }
+    .watch-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+    }
+    .watch-list {
+      display: grid;
+      gap: 5px;
+      max-height: 170px;
+      overflow: auto;
+    }
+    .watch-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 6px;
+      align-items: center;
+      border: 1px solid rgba(115, 220, 255, 0.16);
+      border-radius: 8px;
+      padding: 6px;
+      background: rgba(7, 16, 20, 0.62);
+    }
+    .watch-row.active {
+      border-color: rgba(93, 240, 176, 0.42);
+      background: rgba(10, 39, 32, 0.48);
+    }
+    .watch-main {
+      display: grid;
+      gap: 2px;
+      color: var(--cyan);
+      font-size: 12px;
+      font-weight: 700;
+      text-align: left;
+      border: 0;
+      background: transparent;
+      padding: 0;
+      min-height: 0;
+    }
+    .watch-main small {
+      color: var(--muted);
+      font-weight: 500;
+    }
+    .watch-remove {
+      color: var(--muted);
+      border-color: rgba(255, 115, 115, 0.22);
+      background: rgba(40, 8, 12, 0.42);
+    }
     main {
       display: grid;
       grid-template-rows: auto auto auto auto auto 1fr auto;
@@ -542,6 +628,18 @@
       <div class="metric"><span>Tools</span><strong id="toolCount">0</strong></div>
       <div class="metric"><span>Mode</span><strong id="tradeMode">Paper-safe</strong></div>
       <div class="metric"><span>Currency</span><strong id="accountCurrency">USD</strong></div>
+      <div class="watch-panel">
+        <div class="watch-title"><span>Watch Tickers</span><strong id="selectedTicker">TSLA</strong></div>
+        <div class="watch-form">
+          <input id="tickerInput" type="text" placeholder="TSLA">
+          <button id="addTicker" type="button">Add</button>
+        </div>
+        <div class="watch-actions">
+          <button id="watchNews" type="button">News</button>
+          <button id="watchOptions" type="button">Options</button>
+        </div>
+        <div class="watch-list" id="watchList"></div>
+      </div>
     </aside>
 
     <main>
@@ -648,11 +746,12 @@
         </div>
         <div class="list" id="companyScanResults"></div>
         <h2>Options Research</h2>
-        <div class="list" id="optionsFactors">
-          <div class="pill">Option chain liquidity and bid/ask spread</div>
-          <div class="pill">Expiration, assignment, and exercise risk</div>
-          <div class="pill">Max loss before max gain</div>
-          <div class="pill">Covered calls, protective puts, and cash-secured puts</div>
+        <div class="compact-form">
+          <input id="optionsTicker" type="text" placeholder="TSLA">
+          <button id="analyzeOptions" type="button">Analyze</button>
+        </div>
+        <div class="prompt-grid" id="optionsFactors"></div>
+        <div class="list">
           <div class="pill warn">No options order without explicit confirmation and unlocked order tools</div>
         </div>
         <h2>Automation Prompts</h2>
@@ -678,6 +777,12 @@
     const serverCount = document.querySelector("#serverCount");
     const tradeMode = document.querySelector("#tradeMode");
     const accountCurrency = document.querySelector("#accountCurrency");
+    const selectedTickerEl = document.querySelector("#selectedTicker");
+    const tickerInput = document.querySelector("#tickerInput");
+    const addTicker = document.querySelector("#addTicker");
+    const watchNews = document.querySelector("#watchNews");
+    const watchOptions = document.querySelector("#watchOptions");
+    const watchList = document.querySelector("#watchList");
     const fundPortfolio = document.querySelector("#fundPortfolio");
     const fundBuyingPower = document.querySelector("#fundBuyingPower");
     const fundCash = document.querySelector("#fundCash");
@@ -708,6 +813,9 @@
     const companyUrl = document.querySelector("#companyUrl");
     const scanCompany = document.querySelector("#scanCompany");
     const companyScanResults = document.querySelector("#companyScanResults");
+    const optionsTicker = document.querySelector("#optionsTicker");
+    const analyzeOptions = document.querySelector("#analyzeOptions");
+    const optionsFactors = document.querySelector("#optionsFactors");
     const promptButtons = document.querySelector("#promptButtons");
     const videoSlot = document.querySelector("#videoSlot");
     const panelTabs = Array.from(document.querySelectorAll(".panel-tabs button"));
@@ -718,6 +826,10 @@
     let activeMarketGroup = "US";
     let marketMovers = {};
     let activeMoverGroup = "US";
+    const watchlistKey = "jarvis-watchlist-v1";
+    let watchedTickers = [];
+    let selectedTicker = "TSLA";
+    let watchSnapshotItems = [];
 
     function addBubble(text, kind = "") {
       const div = document.createElement("div");
@@ -747,6 +859,152 @@
       });
       addActivity(`Loaded ${(msg.tools || []).length} tools from ${(msg.servers || []).join(", ") || "no MCP servers"}`, true);
       (msg.warnings || []).forEach((warning) => addActivity(warning));
+    }
+
+    const optionPromptBuilders = [
+      {
+        label: "Chain liquidity",
+        build: (ticker) => `Analyze options for ${ticker} using Alpaca options-data only. Check option-chain liquidity, open interest if available, volume, bid/ask spread quality, expiration depth, and contracts that are too illiquid. Do not place orders.`,
+      },
+      {
+        label: "Expiration risk",
+        build: (ticker) => `Analyze expiration, assignment, and exercise risk for ${ticker} options. Compare near-term versus longer-dated expirations, explain early assignment risk, and flag contracts that should be avoided. Do not place orders.`,
+      },
+      {
+        label: "Max loss first",
+        build: (ticker) => `Analyze ${ticker} option strategies with max loss before max gain. Include breakeven, assignment risk, liquidity risk, and what would invalidate the setup. Research only; do not place orders.`,
+      },
+      {
+        label: "Income/hedge ideas",
+        build: (ticker) => `Research covered calls, protective puts, and cash-secured puts for ${ticker}. Use account exposure and Alpaca options-data if available. Keep this educational and do not place orders without explicit confirmation.`,
+      },
+    ];
+
+    function normalizeTicker(value) {
+      return (value || "").toUpperCase().replace(/[^A-Z0-9./-]/g, "").slice(0, 16);
+    }
+
+    function loadStoredWatchlist() {
+      try {
+        const parsed = JSON.parse(localStorage.getItem(watchlistKey) || "[]");
+        watchedTickers = Array.isArray(parsed) ? parsed.map(normalizeTicker).filter(Boolean) : [];
+      } catch {
+        watchedTickers = [];
+      }
+      if (!watchedTickers.length) watchedTickers = ["TSLA", "NVDA", "SPY"];
+      selectedTicker = watchedTickers.includes(selectedTicker) ? selectedTicker : watchedTickers[0];
+    }
+
+    function saveWatchlist() {
+      localStorage.setItem(watchlistKey, JSON.stringify(watchedTickers));
+    }
+
+    function currentTicker() {
+      return normalizeTicker(optionsTicker.value) || selectedTicker || watchedTickers[0] || "TSLA";
+    }
+
+    function setSelectedTicker(ticker) {
+      const normalized = normalizeTicker(ticker);
+      if (!normalized) return;
+      selectedTicker = normalized;
+      selectedTickerEl.textContent = selectedTicker;
+      optionsTicker.value = selectedTicker;
+      promptBox.value = `Research ${selectedTicker} using Alpaca market data, Newsdata.io, Alpaca news, and options-data. Include price action, news catalysts, option-chain risk, and a watch/buy/avoid view. Do not place orders.`;
+      renderOptionsPrompts();
+      renderWatchlist();
+    }
+
+    function renderOptionsPrompts() {
+      optionsFactors.innerHTML = "";
+      optionPromptBuilders.forEach((item) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = item.label;
+        button.title = item.build(currentTicker());
+        button.addEventListener("click", () => {
+          const ticker = currentTicker();
+          setSelectedTicker(ticker);
+          promptBox.value = item.build(ticker);
+          promptBox.focus();
+          addActivity(`Prepared options research for ${ticker}`, true);
+        });
+        optionsFactors.appendChild(button);
+      });
+    }
+
+    function addTickerToWatchlist(rawTicker) {
+      const ticker = normalizeTicker(rawTicker);
+      if (!ticker) return;
+      if (!watchedTickers.includes(ticker)) watchedTickers.unshift(ticker);
+      selectedTicker = ticker;
+      tickerInput.value = "";
+      saveWatchlist();
+      renderWatchlist();
+      loadWatchlistSnapshots();
+      setSelectedTicker(ticker);
+    }
+
+    function removeTickerFromWatchlist(ticker) {
+      watchedTickers = watchedTickers.filter((item) => item !== ticker);
+      if (!watchedTickers.length) watchedTickers = ["TSLA"];
+      if (selectedTicker === ticker) selectedTicker = watchedTickers[0];
+      saveWatchlist();
+      renderWatchlist();
+      loadWatchlistSnapshots();
+      setSelectedTicker(selectedTicker);
+    }
+
+    function renderWatchlist(items = watchSnapshotItems) {
+      selectedTickerEl.textContent = selectedTicker;
+      optionsTicker.value = currentTicker();
+      const bySymbol = {};
+      (items || []).forEach((item) => {
+        bySymbol[item.display_symbol || item.symbol] = item;
+      });
+      watchList.innerHTML = "";
+      watchedTickers.forEach((ticker) => {
+        const item = bySymbol[ticker] || {};
+        const moveClass = marketMoveClass(item);
+        const row = document.createElement("div");
+        row.className = `watch-row ${ticker === selectedTicker ? "active" : ""}`;
+
+        const main = document.createElement("button");
+        main.type = "button";
+        main.className = "watch-main";
+        main.title = `Select ${ticker}`;
+        main.textContent = ticker;
+        const meta = document.createElement("small");
+        meta.textContent = `${formatMarketNumber(item.price, 2)} | ${formatSignedPercent(item.change_percent)}`;
+        meta.className = moveClass;
+        main.appendChild(meta);
+        main.addEventListener("click", () => {
+          setSelectedTicker(ticker);
+          renderWatchlist(items);
+        });
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "watch-remove";
+        remove.title = `Remove ${ticker}`;
+        remove.textContent = "x";
+        remove.addEventListener("click", () => removeTickerFromWatchlist(ticker));
+
+        row.append(main, remove);
+        watchList.appendChild(row);
+      });
+    }
+
+    async function loadWatchlistSnapshots() {
+      renderWatchlist();
+      try {
+        const data = await fetch(`/api/watchlist/snapshots?symbols=${encodeURIComponent(watchedTickers.join(","))}`).then((res) => res.json());
+        if (data.configured && data.items) {
+          watchSnapshotItems = data.items;
+          renderWatchlist();
+        }
+      } catch (error) {
+        addActivity(`Watchlist snapshots failed: ${error.message}`);
+      }
     }
 
     function setPanel(panelId) {
@@ -1326,6 +1584,23 @@
       }
     }
 
+    function prepareOptionsOverview() {
+      const ticker = currentTicker();
+      setSelectedTicker(ticker);
+      setPanel("panel-research");
+      promptBox.value = `Analyze options for ${ticker} using Alpaca options-data only. Review the option chain, bid/ask spread, volume, open interest if available, expiration choices, implied-volatility risk if available, assignment risk, max loss, and education-only strategy candidates. Do not place orders.`;
+      promptBox.focus();
+      addActivity(`Prepared full options analysis for ${ticker}`, true);
+    }
+
+    function openWatchedNews() {
+      setPanel("panel-news");
+      alpacaNewsSymbols.value = watchedTickers.join(",");
+      loadAlpacaNews();
+      promptBox.value = `Scan Alpaca news and Newsdata.io for these watched tickers: ${watchedTickers.join(", ")}. Explain which tickers are affected, likely catalysts, risk level, and what to watch next. Do not place orders.`;
+      promptBox.focus();
+    }
+
     function connect() {
       const protocol = location.protocol === "https:" ? "wss" : "ws";
       socket = new WebSocket(`${protocol}://${location.host}/ws/agent`);
@@ -1381,13 +1656,35 @@
       else socket.addEventListener("open", sendPayload, { once: true });
     });
 
+    addTicker.addEventListener("click", () => addTickerToWatchlist(tickerInput.value));
+    tickerInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        addTickerToWatchlist(tickerInput.value);
+      }
+    });
+    watchNews.addEventListener("click", openWatchedNews);
+    watchOptions.addEventListener("click", prepareOptionsOverview);
+    analyzeOptions.addEventListener("click", prepareOptionsOverview);
+    optionsTicker.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        prepareOptionsOverview();
+      }
+    });
+
     promptBox.value = "Build a Python prime checker, save it as prime.py, and test it with 97.";
+    loadStoredWatchlist();
+    setSelectedTicker(selectedTicker);
+    renderOptionsPrompts();
+    loadWatchlistSnapshots();
     loadTradingCockpit().catch((error) => addActivity(`Trading cockpit failed: ${error.message}`));
     loadMcpRegistry();
     loadMarketOverview();
     loadMarketMovers();
     loadAccountFunds();
     setInterval(loadAccountFunds, 60000);
+    setInterval(loadWatchlistSnapshots, 90000);
     setInterval(loadMarketOverview, 120000);
     setInterval(loadMarketMovers, 180000);
     refreshNewsdata.addEventListener("click", loadNewsdata);
