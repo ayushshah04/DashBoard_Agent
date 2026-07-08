@@ -124,6 +124,17 @@ NEWS_VIDEO_URLS=https://www.youtube.com/watch?v=QB5BNdBFujE,https://www.youtube.
 
 The backend converts YouTube `watch` links to iframe embed URLs automatically.
 
+## Testing
+
+Run the safe regression suite without creating Alpaca orders:
+
+```bash
+python -m unittest discover -s tests -v
+python -m py_compile server.py agent.py mcp_server_example.py newsdata_mcp_server.py research_vault.py website_scan.py
+```
+
+The tests mock Alpaca responses and cover order sync, staged-ticket guards, blocked paper-order cases, mocked equity/crypto paper-order success paths, risk limits, and Scout ticket status.
+
 ## Newsdata.io
 
 Add a Newsdata.io key to `.env` to power the dashboard headline feed:
