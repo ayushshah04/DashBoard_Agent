@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import asyncio
 import json
+import math
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -98,6 +99,36 @@ def account_currency_fallback() -> str:
     return os.getenv("ACCOUNT_CURRENCY", "USD").strip().upper() or "USD"
 
 
+def parse_trade_number(value: object) -> float | None:
+    match = re.search(r"-?\$?\s*(\d+(?:\.\d+)?)", str(value or "").replace(",", ""))
+    if not match:
+        return None
+    try:
+        return float(match.group(1))
+    except ValueError:
+        return None
+
+
+def normalize_order_symbol(symbol: object) -> str:
+    return re.sub(r"[^A-Za-z0-9./-]", "", str(symbol or "").upper())[:24]
+
+
+def infer_asset_class(symbol: str, candidate: dict[str, object]) -> str:
+    raw = str(candidate.get("asset_class") or candidate.get("assetClass") or "").strip().lower()
+    if "crypto" in raw or "/" in symbol:
+        return "crypto"
+    if "option" in raw:
+        return "option"
+    return "equity"
+
+
+def order_status_label(status: object) -> str:
+    value = str(status or "").replace("_", " ").strip()
+    if not value:
+        return "Paper submitted"
+    return f"Alpaca {value.title()}"
+
+
 RISK_LIMITS: dict[str, dict[str, object]] = {
     "max_order_notional_usd": {
         "env": "MAX_ORDER_NOTIONAL_USD",
@@ -128,6 +159,35 @@ RISK_LIMITS: dict[str, dict[str, object]] = {
         "integer": True,
     },
 }
+
+
+ALPACA_EXECUTION_MARKETS: list[dict[str, str]] = [
+    {
+        "market": "U.S. equities and ETFs",
+        "support": "supported",
+        "execution": "Direct paper/live orders through Alpaca Trading API.",
+    },
+    {
+        "market": "Listed U.S. options",
+        "support": "supported_with_unlock",
+        "execution": "Research is enabled when options-data is configured; orders stay locked until explicitly allowed.",
+    },
+    {
+        "market": "Supported crypto spot pairs",
+        "support": "supported",
+        "execution": "Direct paper/live orders for Alpaca-supported crypto pairs such as BTC/USD and ETH/USD.",
+    },
+    {
+        "market": "FX/currency",
+        "support": "data_or_proxy_only",
+        "execution": "Alpaca has forex rates data, but normal trading accounts do not directly execute spot FX; use listed FX ETFs/options as proxies.",
+    },
+    {
+        "market": "Oil and commodities",
+        "support": "proxy_only",
+        "execution": "Alpaca does not directly execute oil futures in the normal Trading API; use listed ETFs/options/equities such as USO, BNO, XLE, or oil producers.",
+    },
+]
 
 
 def risk_settings_path() -> Path:
@@ -411,6 +471,40 @@ def to_float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def alpaca_order_trade_record(order: dict[str, object], reason: str = "Synced from Alpaca orders.") -> dict[str, object]:
+    symbol = normalize_order_symbol(order.get("symbol"))
+    submitted = str(order.get("submitted_at") or order.get("created_at") or "")
+    filled_price = order.get("filled_avg_price")
+    limit_price = order.get("limit_price")
+    stop_price = order.get("stop_price")
+    notional = order.get("notional")
+    qty = order.get("qty")
+    order_id = str(order.get("id") or "")
+    status = order_status_label(order.get("status"))
+    side = str(order.get("side") or "").lower()
+    asset_class = str(order.get("asset_class") or ("crypto" if "/" in symbol else "equity"))
+    size_parts = []
+    if qty not in {None, ""}:
+        size_parts.append(f"{qty} qty")
+    if notional not in {None, ""}:
+        size_parts.append(f"${notional} notional")
+    return {
+        "status": status,
+        "outcome": "open" if str(order.get("status") or "").lower() not in {"rejected", "canceled", "expired"} else "blocked",
+        "symbol": symbol,
+        "asset_class": asset_class,
+        "direction": "long" if side == "buy" else side or "--",
+        "entry": f"${filled_price}" if filled_price not in {None, ""} else (f"limit ${limit_price}" if limit_price not in {None, ""} else "market"),
+        "exit_target": "--",
+        "stop": f"${stop_price}" if stop_price not in {None, ""} else "--",
+        "quantity_or_notional": " / ".join(size_parts) or "--",
+        "order_id": order_id,
+        "api_status": str(order.get("status") or "submitted"),
+        "submitted_at": submitted,
+        "reason": reason,
+    }
 
 
 def market_item_payload(item: dict[str, str], snapshots: dict[str, dict[str, object]]) -> dict[str, object]:
@@ -714,7 +808,7 @@ def scout_candidate_payload(
     if direction == "skip-short":
         status = "Skipped"
     elif score >= 55:
-        status = "Ticket ready"
+        status = "Staged ticket"
     else:
         status = "Watch"
     if not tradable:
@@ -727,6 +821,8 @@ def scout_candidate_payload(
         "direction": direction,
         "status": status,
         "outcome": "skipped" if status in {"Skipped", "Blocked"} else "open",
+        "execution_route": "alpaca_order_api" if status == "Staged ticket" else "watch_only",
+        "api_status": "not_sent",
         "score": score,
         "price": price,
         "change": change,
@@ -762,6 +858,10 @@ def trading_status() -> dict[str, object]:
         "order_tools_locked": not paper and not live_unlocked,
         "base_url": os.getenv("ALPACA_BASE_URL", ""),
         "currency": account_currency_fallback(),
+        "execution": {
+            "summary": "Direct: equities, ETFs, options, crypto | FX/oil: data or listed proxies",
+            "markets": ALPACA_EXECUTION_MARKETS,
+        },
         "robinhood": {
             "mcp_url": os.getenv("ROBINHOOD_MCP_URL", "https://agent.robinhood.com/mcp/trading"),
             "mcp_enabled": env_bool("ROBINHOOD_MCP_ENABLED", False),
@@ -823,7 +923,7 @@ async def update_risk_settings(payload: dict[str, object] = Body(...)) -> dict[s
 async def trading_prompts() -> dict[str, str]:
     status = trading_status()
     risk = status["risk"]
-    markets = ", ".join(status["markets"])
+    markets = str(status["execution"]["summary"])
     return {
         "paper_research": (
             f"Screen {markets} using Alpaca market movers, snapshots, account exposure, and news. "
@@ -838,7 +938,8 @@ async def trading_prompts() -> dict[str, str]:
             f"Screen {markets}, use account exposure, market movers, snapshots, Alpaca news, Newsdata.io, "
             f"Research Vault context, and risk limits. Return one execution-ready trade ticket only: symbol, "
             f"asset class, direction, order type, notional/quantity, entry, stop/invalidation, profit/risk target, "
-            f"news risk, and EXECUTE/SKIP decision. Do not place orders. End with a TRADE_RECORD block containing "
+            f"news risk, and EXECUTE/SKIP decision. Treat FX/currency and oil as data context or listed proxies only. "
+            f"Do not place orders. End with a TRADE_RECORD block containing "
             f"status, symbol, asset_class, direction, entry, exit_target, stop, quantity_or_notional, order_id, and reason."
         ),
         "continuous_paper_scout": (
@@ -931,6 +1032,160 @@ async def alpaca_account() -> dict[str, object]:
         "mode": "paper" if env_bool("ALPACA_PAPER_TRADE", True) else "live",
         "currency": account.get("currency") or account_currency_fallback(),
         "account": {key: account.get(key) for key in keys if key in account},
+    }
+
+
+@app.get("/api/alpaca/orders")
+async def alpaca_orders(
+    status: str = Query(default="all"),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> dict[str, object]:
+    headers = alpaca_headers()
+    if not headers["APCA-API-KEY-ID"] or not headers["APCA-API-SECRET-KEY"]:
+        return {
+            "configured": False,
+            "message": "Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env to sync Alpaca orders.",
+            "orders": [],
+            "trade_records": [],
+        }
+
+    base_url = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2").rstrip("/")
+    async with httpx.AsyncClient(timeout=20, headers=headers) as client:
+        response = await client.get(
+            f"{base_url}/orders",
+            params={"status": status, "limit": limit, "direction": "desc", "nested": "true"},
+        )
+        if response.is_error:
+            return {
+                "configured": True,
+                "status": "error",
+                "message": f"Alpaca orders returned HTTP {response.status_code}: {response.text[:240]}",
+                "orders": [],
+                "trade_records": [],
+            }
+        orders = response.json()
+    if not isinstance(orders, list):
+        orders = []
+    return {
+        "configured": True,
+        "status": "success",
+        "mode": "paper" if env_bool("ALPACA_PAPER_TRADE", True) else "live",
+        "orders": orders,
+        "trade_records": [alpaca_order_trade_record(order) for order in orders if isinstance(order, dict)],
+    }
+
+
+@app.post("/api/alpaca/paper-order")
+async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[str, object]:
+    headers = alpaca_headers()
+    if not headers["APCA-API-KEY-ID"] or not headers["APCA-API-SECRET-KEY"]:
+        return {
+            "status": "blocked",
+            "message": "Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env before submitting paper orders.",
+        }
+    if not env_bool("ALPACA_PAPER_TRADE", True):
+        return {
+            "status": "blocked",
+            "message": "Direct dashboard execution is paper-only. Switch ALPACA_PAPER_TRADE=true for paper testing.",
+        }
+
+    symbol = normalize_order_symbol(candidate.get("symbol"))
+    asset_class = infer_asset_class(symbol, candidate)
+    direction = str(candidate.get("direction") or candidate.get("side") or "long").lower()
+    staged_status = str(candidate.get("status") or "").lower()
+    if not symbol:
+        return {"status": "blocked", "message": "No symbol was provided for the paper order."}
+    if asset_class not in {"equity", "crypto"}:
+        return {
+            "status": "blocked",
+            "message": "Direct dashboard execution supports Alpaca equities/ETFs and crypto only. Options stay research-only until explicitly unlocked.",
+            "supported_markets": ALPACA_EXECUTION_MARKETS,
+        }
+    if any(word in staged_status for word in ["skip", "blocked", "rejected"]):
+        return {"status": "blocked", "message": f"Candidate status is {candidate.get('status')}; no paper order submitted."}
+    if not any(word in staged_status for word in ["staged", "ticket", "ready"]):
+        return {"status": "blocked", "message": "Run Scout or build a trade ticket first; only staged tickets can be executed."}
+    if "short" in direction or direction == "sell":
+        return {
+            "status": "blocked",
+            "message": "Direct Scout execution is long-only for paper safety. Build a manual ticket for short-sale research.",
+        }
+
+    risk_settings = current_risk_settings()
+    max_order = to_float(risk_settings.get("max_order_notional_usd")) or 50
+    max_position = to_float(risk_settings.get("max_position_usd")) or max_order
+    requested_notional = parse_trade_number(candidate.get("size") or candidate.get("quantity_or_notional"))
+    notional = min(value for value in [max_order, max_position, requested_notional or max_order] if value and value > 0)
+
+    base_url = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2").rstrip("/")
+    async with httpx.AsyncClient(timeout=25, headers=headers) as client:
+        account_response = await client.get(f"{base_url}/account")
+        if account_response.is_error:
+            return {
+                "status": "blocked",
+                "message": f"Alpaca account check returned HTTP {account_response.status_code}: {account_response.text[:240]}",
+            }
+        account = account_response.json()
+        buying_power = to_float(account.get("buying_power")) or 0
+        notional = min(notional, buying_power)
+        if notional < 1:
+            return {"status": "blocked", "message": "Buying power or risk limit is below $1; no paper order submitted."}
+
+        order_payload: dict[str, object] = {
+            "symbol": symbol,
+            "side": "buy",
+            "type": "market",
+            "notional": f"{notional:.2f}",
+            "client_order_id": f"jarvis-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"[:48],
+        }
+        if asset_class == "crypto":
+            order_payload["time_in_force"] = "gtc"
+        else:
+            asset_response = await client.get(f"{base_url}/assets/{symbol}")
+            if asset_response.is_error:
+                return {
+                    "status": "blocked",
+                    "message": f"Alpaca asset check for {symbol} returned HTTP {asset_response.status_code}: {asset_response.text[:240]}",
+                }
+            asset = asset_response.json()
+            if not asset.get("tradable"):
+                return {"status": "blocked", "message": f"{symbol} is not marked tradable by Alpaca."}
+            order_payload["time_in_force"] = "day"
+            if not asset.get("fractionable"):
+                entry_price = parse_trade_number(candidate.get("entry") or candidate.get("price"))
+                if not entry_price or entry_price <= 0:
+                    return {"status": "blocked", "message": f"{symbol} is not fractionable; run Scout again so the ticket has a usable entry price."}
+                qty = math.floor(notional / entry_price)
+                if qty < 1:
+                    return {"status": "blocked", "message": f"Risk limit ${notional:.2f} is too small to buy one share of {symbol}."}
+                order_payload.pop("notional", None)
+                order_payload["qty"] = str(qty)
+
+        response = await client.post(f"{base_url}/orders", json=order_payload)
+        if response.is_error:
+            return {
+                "status": "rejected",
+                "message": f"Alpaca rejected the paper order with HTTP {response.status_code}: {response.text[:320]}",
+                "request": {key: value for key, value in order_payload.items() if key != "client_order_id"},
+            }
+        order = response.json()
+
+    trade_record = alpaca_order_trade_record(order, reason=str(candidate.get("reason") or "Submitted from Jarvis Market Console."))
+    trade_record["exit_target"] = candidate.get("exitTarget") or candidate.get("exit_target") or "--"
+    trade_record["stop"] = candidate.get("stop") or trade_record.get("stop") or "--"
+    trade_record["entry"] = candidate.get("entry") or trade_record.get("entry") or "market"
+    trade_record["quantity_or_notional"] = (
+        candidate.get("size")
+        or candidate.get("quantity_or_notional")
+        or trade_record.get("quantity_or_notional")
+        or f"${notional:.2f} notional"
+    )
+    return {
+        "status": "submitted",
+        "message": f"Paper order submitted to Alpaca for {symbol}.",
+        "order": order,
+        "trade_record": trade_record,
+        "supported_markets": ALPACA_EXECUTION_MARKETS,
     }
 
 
@@ -1254,6 +1509,7 @@ async def alpaca_scout(
         "engine": "alpaca-first",
         "uses_openai": False,
         "mode": "paper" if paper_mode else "live-locked",
+        "supported_markets": ALPACA_EXECUTION_MARKETS,
         "risk": risk_settings,
         "buying_power": buying_power,
         "scanned": {

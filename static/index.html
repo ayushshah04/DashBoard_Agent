@@ -344,6 +344,19 @@
       font-size: 11px;
       overflow-wrap: anywhere;
     }
+    .trade-board-actions {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+    }
+    .trade-board-actions button {
+      min-height: 26px;
+      padding: 4px 7px;
+      font-size: 10px;
+      white-space: nowrap;
+    }
     .trade-board-rows {
       display: grid;
       gap: 4px;
@@ -355,11 +368,11 @@
     }
     .trade-row {
       display: grid;
-      grid-template-columns: minmax(82px, 0.8fr) minmax(98px, 0.75fr) minmax(170px, 1.15fr) minmax(150px, 1fr) minmax(140px, 0.95fr) minmax(190px, 1.2fr) minmax(86px, 0.62fr);
+      grid-template-columns: minmax(82px, 0.7fr) minmax(110px, 0.82fr) minmax(150px, 1fr) minmax(140px, 0.9fr) minmax(120px, 0.8fr) minmax(170px, 1.05fr) minmax(82px, 0.55fr) minmax(120px, 0.85fr);
       gap: 6px;
       align-items: center;
       min-height: 28px;
-      min-width: 950px;
+      min-width: 1050px;
       padding: 5px 6px;
       border: 1px solid rgba(115, 220, 255, 0.14);
       border-radius: 8px;
@@ -977,7 +990,11 @@
       <div class="trade-board">
         <div class="trade-board-head">
           <span>Trade Board</span>
-          <strong id="tradeBoardStatus">No trade tickets yet</strong>
+          <div class="trade-board-actions">
+            <strong id="tradeBoardStatus">No trade tickets yet</strong>
+            <button id="syncAlpacaOrders" type="button">Sync Orders</button>
+            <button id="clearStagedTrades" type="button">Clear Staged</button>
+          </div>
         </div>
         <div class="trade-board-rows" id="tradeBoardRows"></div>
       </div>
@@ -1240,6 +1257,8 @@
     const continuousScout = document.querySelector("#continuousScout");
     const tradeBoardStatus = document.querySelector("#tradeBoardStatus");
     const tradeBoardRows = document.querySelector("#tradeBoardRows");
+    const syncAlpacaOrders = document.querySelector("#syncAlpacaOrders");
+    const clearStagedTrades = document.querySelector("#clearStagedTrades");
     const newsFactors = document.querySelector("#newsFactors");
     const newsDataFeed = document.querySelector("#newsDataFeed");
     const refreshNewsdata = document.querySelector("#refreshNewsdata");
@@ -1300,6 +1319,8 @@
     let tradeRecords = [];
     let pendingTradeRecordId = null;
     let latestPortfolioValue = 0;
+    let latestScoutCandidate = null;
+    let directPaperBusy = false;
 
     function addBubble(text, kind = "") {
       const div = document.createElement("div");
@@ -1352,7 +1373,7 @@
       if (text.includes("blocked") || text.includes("rejected")) return "blocked";
       if (text.includes("skip") || text.includes("no trade") || text.includes("do nothing")) return "skipped";
       if (text.includes("executed") || text.includes("filled") || text.includes("submitted")) return "open";
-      if (text.includes("ticket")) return "ticket";
+      if (text.includes("ticket") || text.includes("staged") || text.includes("watch")) return "ticket";
       return "open";
     }
 
@@ -1365,6 +1386,59 @@
         return entry * qty;
       }
       return 0;
+    }
+
+    function isSubmittedRecord(record) {
+      return Boolean(record.orderId || /(submitted|filled|alpaca|executed)/i.test(record.status || ""));
+    }
+
+    function isStagedRecord(record) {
+      return !isSubmittedRecord(record)
+        && /(staged|ticket|watch|requested|scout)/i.test(`${record.status || ""} ${record.kind || ""}`);
+    }
+
+    function recordApiText(record) {
+      if (record.orderId) return `Alpaca ${String(record.orderId).slice(0, 8)}`;
+      if (/alpaca reason/i.test(record.apiStatus || "")) return "Not sent";
+      if (record.apiStatus) return record.apiStatus;
+      if (isStagedRecord(record)) return "Not sent";
+      return "--";
+    }
+
+    function normalizeTradeRecord(record) {
+      const normalized = { ...record, tradeDate: normalizeRecordDate(record) };
+      if (!isSubmittedRecord(normalized) && /^ticket ready$/i.test(normalized.status || "")) {
+        normalized.status = "Staged ticket";
+        normalized.apiStatus = normalized.apiStatus || "Not sent";
+      }
+      return normalized;
+    }
+
+    function compactTradeRecords(records) {
+      const seen = new Map();
+      const compacted = [];
+      records.forEach((record) => {
+        const normalized = normalizeTradeRecord(record);
+        if (isSubmittedRecord(normalized)) {
+          compacted.push(normalized);
+          return;
+        }
+        const key = [
+          normalized.kind || "",
+          normalized.symbol || "",
+          normalized.status || "",
+          normalized.tradeDate || "",
+        ].join("|");
+        if (!seen.has(key)) {
+          normalized.scanCount = normalized.scanCount || 1;
+          seen.set(key, normalized);
+          compacted.push(normalized);
+          return;
+        }
+        const existing = seen.get(key);
+        existing.scanCount = Number(existing.scanCount || 1) + Number(normalized.scanCount || 1);
+      });
+      return compacted.slice(0, 250);
     }
 
     function rewardRiskRatio(record) {
@@ -1474,7 +1548,7 @@
     function updateTradeActionState() {
       const hasResult = Boolean(latestAgentResult);
       buildTradeTicket.disabled = agentBusy;
-      executePaperTrade.disabled = agentBusy;
+      executePaperTrade.disabled = agentBusy || directPaperBusy;
       continuousScout.disabled = scoutBusy;
       continuousScout.textContent = scoutBusy ? "Scout Running" : (continuousScoutTimer ? "Stop Scout" : "Start Scout");
       continuousScout.classList.toggle("scout-on", Boolean(continuousScoutTimer));
@@ -1487,10 +1561,72 @@
       tradeActionStatus.textContent = `${hasResult ? "Last result ready" : "Waiting for research result"} | ${mode} | ${scout}`;
     }
 
+    function mergeAlpacaTradeRecord(remote) {
+      const orderId = remote.order_id || remote.orderId || "";
+      const symbol = remote.symbol || "--";
+      const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      let record = orderId ? tradeRecords.find((item) => item.orderId === orderId) : null;
+      if (!record) {
+        record = tradeRecords.find((item) => item.symbol === symbol && isStagedRecord(item) && !item.orderId);
+      }
+      const update = {
+        status: remote.status || "Alpaca order",
+        outcome: remote.outcome || "open",
+        symbol,
+        direction: remote.direction || "--",
+        entry: remote.entry || "market",
+        exitTarget: remote.exit_target || remote.exitTarget || "--",
+        stop: remote.stop || "--",
+        size: remote.quantity_or_notional || remote.size || "--",
+        orderId,
+        apiStatus: remote.api_status || remote.apiStatus || "synced",
+        reason: remote.reason || "Synced from Alpaca orders.",
+        updatedAt: now,
+      };
+      if (record) {
+        Object.assign(record, update);
+      } else {
+        tradeRecords.unshift({
+          id: Date.now() + Math.random(),
+          kind: "Alpaca Order",
+          tradeDate: todayIsoDate(),
+          createdAt: now,
+          ...update,
+        });
+      }
+    }
+
+    async function loadAlpacaOrders() {
+      try {
+        const data = await fetch("/api/alpaca/orders?status=all&limit=50").then((res) => res.json());
+        if (!data.configured || data.status === "error") {
+          addActivity(data.message || "Alpaca order sync unavailable.");
+          return;
+        }
+        (data.trade_records || []).forEach(mergeAlpacaTradeRecord);
+        tradeRecords = compactTradeRecords(tradeRecords);
+        saveTradeRecords();
+        renderTradeBoard();
+        addActivity(`Synced ${(data.trade_records || []).length} recent Alpaca orders.`, true);
+      } catch (error) {
+        addActivity(`Alpaca order sync failed: ${error.message}`);
+      }
+    }
+
+    function clearStagedTradeRows() {
+      const before = tradeRecords.length;
+      tradeRecords = tradeRecords.filter((record) => !isStagedRecord(record));
+      latestScoutCandidate = null;
+      saveTradeRecords();
+      renderTradeBoard();
+      addActivity(`Cleared ${before - tradeRecords.length} staged/not-sent trade rows.`, true);
+    }
+
     function tradeRecordClass(status) {
       const value = (status || "").toLowerCase();
-      if (value.includes("executed") || value.includes("filled") || value.includes("submitted")) return "hot";
+      if (value.includes("executed") || value.includes("filled") || value.includes("submitted") || value.includes("alpaca")) return "hot";
       if (value.includes("skip") || value.includes("rejected") || value.includes("blocked")) return "warn";
+      if (value.includes("staged") || value.includes("watch") || value.includes("ticket")) return "warn";
       return "";
     }
 
@@ -1501,9 +1637,8 @@
     function loadTradeRecords() {
       try {
         const parsed = JSON.parse(localStorage.getItem(tradeRecordsKey) || "[]");
-        tradeRecords = Array.isArray(parsed)
-          ? parsed.map((record) => ({ ...record, tradeDate: normalizeRecordDate(record) }))
-          : [];
+        tradeRecords = Array.isArray(parsed) ? compactTradeRecords(parsed) : [];
+        saveTradeRecords();
       } catch {
         tradeRecords = [];
       }
@@ -1517,7 +1652,7 @@
 
       const header = document.createElement("div");
       header.className = "trade-row header";
-      ["Symbol", "Status", "Entry", "Exit/Target", "Stop", "Size", "Updated"].forEach((label) => {
+      ["Symbol", "Status", "Entry", "Exit/Target", "Stop", "Size", "Updated", "API"].forEach((label) => {
         const span = document.createElement("span");
         span.textContent = label;
         header.appendChild(span);
@@ -1527,7 +1662,7 @@
       if (!tradeRecords.length) {
         const empty = document.createElement("div");
         empty.className = "trade-row warn";
-        ["--", "Waiting", "--", "--", "--", "--", "Run Trade Ticket or Execute Paper"].forEach((value) => {
+        ["--", "Waiting", "--", "--", "--", "--", "Run Scout", "Not sent"].forEach((value) => {
           const span = document.createElement("span");
           span.textContent = value;
           empty.appendChild(span);
@@ -1548,6 +1683,7 @@
           record.stop || "--",
           record.size || "--",
           record.updatedAt || record.createdAt || "--",
+          recordApiText(record),
         ].forEach((value, index) => {
           const span = document.createElement("span");
           span.className = index === 0 ? "trade-symbol" : "";
@@ -1573,6 +1709,7 @@
         stop: "--",
         size: "--",
         orderId: "",
+        apiStatus: "Not sent",
         reason: "",
         source: compactAgentContext(prompt),
         tradeDate: todayIsoDate(),
@@ -1618,6 +1755,7 @@
         stop: fieldFromText(source, ["stop", "stop loss", "stop/invalidation", "invalidation"]) || "--",
         size: fieldFromText(source, ["quantity", "qty", "notional", "size", "quantity_or_notional"]) || "--",
         orderId: fieldFromText(source, ["order_id", "order id"]) || "",
+        apiStatus: fieldFromText(source, ["api_status", "api status", "alpaca_status", "alpaca status"]) || "",
         reason: fieldFromText(source, ["reason", "notes", "risk"]) || source.slice(0, 220),
       };
     }
@@ -1640,6 +1778,7 @@
           stop: "--",
           size: "--",
           orderId: "",
+          apiStatus: "Not sent",
           reason: "",
           source: "",
           tradeDate: todayIsoDate(),
@@ -2284,7 +2423,10 @@
       tradingConfigCache = config;
       tradeMode.textContent = config.paper ? "Paper-safe" : (config.live_trading_enabled ? "Live unlocked" : "Live locked");
       accountCurrency.textContent = config.currency || "USD";
-      markets.textContent = config.markets.join(", ");
+      markets.textContent = config.execution?.summary || config.markets.join(", ");
+      markets.title = (config.execution?.markets || [])
+        .map((item) => `${item.market}: ${item.execution}`)
+        .join("\n");
       risk.textContent = riskSummaryText(config.risk);
       fillRiskControls(config.risk || {}, config.risk_source || "environment");
       orderTools.textContent = config.order_tools_locked ? "Locked" : "Available";
@@ -2726,7 +2868,8 @@ Use these links plus Alpaca market data, Alpaca news, Newsdata.io, the Research 
     }
 
     function marketScopeText() {
-      return (tradingConfigCache.markets || ["equities", "crypto", "currency"]).join(", ");
+      return tradingConfigCache.execution?.summary
+        || (tradingConfigCache.markets || ["equities", "crypto", "FX/oil proxies"]).join(", ");
     }
 
     function riskText() {
@@ -2811,7 +2954,7 @@ ${latestResultBlock()}`;
 
 Scan all configured markets (${marketScopeText()}) plus watchlist (${watchlistText()}) using market movers, snapshots, account exposure, Alpaca news, Newsdata.io sentiment, Research Vault context, company/earnings catalysts if available, and options risk if relevant.
 
-Find the best risk-adjusted trade candidate across equities, crypto, and currency. If paper trading tools are available, you may place at most one small paper trade only when the setup is strong, liquid, and within ${riskText()}. If live trading is unlocked, do not auto-execute from this continuous scout; return a trade ticket instead. If no setup is good, do nothing and explain the skip.
+Find the best risk-adjusted trade candidate across Alpaca-supported execution markets. FX/currency and oil should be treated as data context or listed ETF/option/equity proxies, not direct spot FX or futures execution. If paper trading tools are available, you may place at most one small paper trade only when the setup is strong, liquid, and within ${riskText()}. If live trading is unlocked, do not auto-execute from this continuous scout; return a trade ticket instead. If no setup is good, do nothing and explain the skip.
 
 Return: cycle number, scanned universe, chosen candidate, execute/skip decision, order details if paper-executed, risk controls, and next watch condition.
 
@@ -2857,11 +3000,105 @@ END_TRADE_RECORD`;
       }
     }
 
-    function requestPaperExecution() {
-      const prompt = executePaperTradePrompt();
-      if (submitAgentPrompt(prompt, "Paper trade execution requested")) {
-        makeTradeRecord("Paper", prompt);
+    function latestExecutableRecord() {
+      return tradeRecords.find((record) => isStagedRecord(record) && !record.orderId)
+        || (latestScoutCandidate ? tradeRecords.find((record) => record.id === latestScoutCandidate.dashboardRecordId) : null);
+    }
+
+    function paperPayloadFromRecord(record) {
+      return {
+        symbol: record.symbol,
+        asset_class: record.assetClass || record.asset_class || (record.symbol && record.symbol.includes("/") ? "crypto" : "equity"),
+        direction: record.direction || "long",
+        status: record.status || "Staged ticket",
+        entry: record.entry,
+        exitTarget: record.exitTarget,
+        exit_target: record.exitTarget,
+        stop: record.stop,
+        size: record.size,
+        quantity_or_notional: record.size,
+        reason: record.reason,
+      };
+    }
+
+    function applyTradeRecordUpdate(record, update) {
+      const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      Object.assign(record, {
+        status: update.status || record.status,
+        outcome: update.outcome || record.outcome || "open",
+        symbol: update.symbol || record.symbol,
+        direction: update.direction || record.direction,
+        entry: update.entry || record.entry,
+        exitTarget: update.exitTarget || update.exit_target || record.exitTarget,
+        stop: update.stop || record.stop,
+        size: update.size || update.quantity_or_notional || record.size,
+        orderId: update.orderId || update.order_id || record.orderId || "",
+        apiStatus: update.apiStatus || update.api_status || record.apiStatus || "Not sent",
+        reason: update.reason || record.reason,
+        tradeDate: record.tradeDate || todayIsoDate(),
+        updatedAt: now,
+      });
+    }
+
+    async function executePaperOrderDirect(record) {
+      directPaperBusy = true;
+      executePaperTrade.disabled = true;
+      updateTradeActionState();
+      try {
+        const response = await fetch("/api/alpaca/paper-order", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(paperPayloadFromRecord(record)),
+        });
+        const data = await response.json();
+        if (data.status === "submitted" && data.trade_record) {
+          applyTradeRecordUpdate(record, {
+            ...data.trade_record,
+            status: "Paper submitted",
+            apiStatus: data.trade_record.api_status || data.order?.status || "submitted",
+          });
+          saveTradeRecords();
+          renderTradeBoard();
+          addActivity(`Paper order submitted to Alpaca for ${record.symbol}.`, true);
+          addBubble(`${data.message}\nOrder ID: ${record.orderId || "--"}`, "tool");
+          await loadAlpacaOrders();
+          await loadAccountFunds();
+          return true;
+        }
+        applyTradeRecordUpdate(record, {
+          status: data.status === "rejected" ? "Rejected" : "Blocked",
+          outcome: "blocked",
+          apiStatus: data.status || "blocked",
+          reason: data.message || "Paper order was not submitted.",
+        });
+        saveTradeRecords();
+        renderTradeBoard();
+        addActivity(data.message || "Paper order was not submitted.");
+        addBubble(data.message || "Paper order was not submitted.", "tool");
+        return false;
+      } catch (error) {
+        addActivity(`Direct paper execution failed: ${error.message}`);
+        addBubble(`Direct paper execution failed: ${error.message}`, "tool");
+        return false;
+      } finally {
+        directPaperBusy = false;
+        updateTradeActionState();
       }
+    }
+
+    async function requestPaperExecution() {
+      let record = latestExecutableRecord();
+      if (!record) {
+        addActivity("No staged ticket found. Running one Alpaca Scout cycle first.", true);
+        const started = await runContinuousScoutCycle();
+        if (!started) return;
+        record = latestExecutableRecord();
+      }
+      if (!record) {
+        addBubble("No executable staged ticket is available. Run Scout or Trade Ticket first.", "tool");
+        return;
+      }
+      await executePaperOrderDirect(record);
     }
 
     function scoutSummary(data, candidate) {
@@ -2890,27 +3127,42 @@ This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticke
 
     function addScoutRecord(candidate, cycleNumber) {
       const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const symbol = candidate.symbol || "--";
+      const status = candidate.status === "Ticket ready" ? "Staged ticket" : (candidate.status || "Watch");
+      const existing = tradeRecords.find((record) => (
+        record.kind === "Alpaca Scout"
+        && record.symbol === symbol
+        && isStagedRecord(record)
+        && normalizeRecordDate(record) === todayIsoDate()
+      ));
       const record = {
-        id: Date.now(),
+        id: existing?.id || Date.now(),
         kind: "Alpaca Scout",
-        status: candidate.status || "Watch",
+        status,
         outcome: candidate.outcome || "open",
-        symbol: candidate.symbol || "--",
+        symbol,
         direction: candidate.direction || "--",
         entry: candidate.entry || "--",
         exitTarget: candidate.exit_target || "--",
         stop: candidate.stop || "--",
         size: candidate.size || "--",
-        orderId: "",
+        orderId: existing?.orderId || "",
+        apiStatus: existing?.apiStatus || "Not sent",
         reason: `Score ${candidate.score || 0}. ${candidate.reason || ""}`,
         source: `Alpaca Scout cycle ${cycleNumber}. ${JSON.stringify(candidate)}`,
         tradeDate: todayIsoDate(),
-        createdAt: now,
+        createdAt: existing?.createdAt || now,
         updatedAt: now,
+        scanCount: Number(existing?.scanCount || 0) + 1,
       };
-      tradeRecords.unshift(record);
+      if (existing) {
+        Object.assign(existing, record);
+      } else {
+        tradeRecords.unshift(record);
+      }
       tradeRecords = tradeRecords.slice(0, 250);
       pendingTradeRecordId = null;
+      latestScoutCandidate = { ...candidate, status, dashboardRecordId: record.id };
       saveTradeRecords();
       renderTradeBoard();
     }
@@ -3054,6 +3306,8 @@ This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticke
     buildTradeTicket.addEventListener("click", requestTradeTicket);
     executePaperTrade.addEventListener("click", requestPaperExecution);
     continuousScout.addEventListener("click", toggleContinuousScout);
+    syncAlpacaOrders.addEventListener("click", () => loadAlpacaOrders());
+    clearStagedTrades.addEventListener("click", clearStagedTradeRows);
     analyzeOptions.addEventListener("click", prepareOptionsOverview);
     optionsTicker.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
@@ -3086,6 +3340,7 @@ This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticke
     loadWatchlistSnapshots();
     summarizeResearchVault().catch((error) => addActivity(`Research vault summary failed: ${error.message}`));
     loadTradingCockpit().catch((error) => addActivity(`Trading cockpit failed: ${error.message}`));
+    loadAlpacaOrders().catch((error) => addActivity(`Alpaca order sync failed: ${error.message}`));
     loadMcpRegistry();
     loadMarketOverview();
     loadMarketMovers();

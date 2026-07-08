@@ -86,7 +86,7 @@ LIVE_TRADING_CONFIRMATION=I_UNDERSTAND_LIVE_TRADING_RISK
 MAX_POSITION_USD=100
 MAX_DAILY_LOSS_USD=250
 MAX_ORDER_NOTIONAL_USD=50
-MARKET_UNIVERSE=equities,crypto,currency
+MARKET_UNIVERSE=equities,crypto,fx-proxies,oil-proxies
 ACCOUNT_CURRENCY=USD
 WATCHLIST_SYMBOLS=TSLA,NVDA,SPY
 RESEARCH_VAULT_DB=research_vault.db
@@ -100,17 +100,21 @@ The dashboard exposes live/paper status, risk limits, market scope, a news-facto
 
 Risk Management is editable directly on the dashboard. Change the Order, Position, Daily Loss, or Options limits and press `Save Risk`; the backend stores those local overrides in ignored `risk_settings.json` so they survive server restarts without being pushed to GitHub.
 
-The Trade Action Center captures the latest agent research result and lets you:
+The Trade Action Center captures the latest research/Scout result and lets you:
 
 - Build an execution-ready trade ticket.
-- Execute one small paper trade when paper order tools are available and risk checks pass.
+- Execute one small paper trade directly through Alpaca's paper Orders API when the staged ticket, account, asset, and risk checks pass.
 - Start or stop an Alpaca-first Scout that scans markets every five minutes without using OpenAI credits.
 
-The dashboard adds portfolio metrics under the funds row: tracked trades, win rate, win/loss count, reward/risk ratio, and exposure ratio. The Trade Board sits below those metrics and stores recent tickets/execution requests in the browser with symbol, status, entry, exit/target, stop, size, and update time in a scrollable table. Agent trade prompts ask for a final `TRADE_RECORD` block so those fields can update from the result.
+The dashboard adds portfolio metrics under the funds row: tracked trades, win rate, win/loss count, reward/risk ratio, and exposure ratio. The Trade Board sits below those metrics and stores recent tickets/execution requests in the browser with symbol, status, entry, exit/target, stop, size, update time, and Alpaca API/order status in a scrollable table. `Staged ticket` means the idea is not sent to Alpaca yet. `Paper submitted` plus an Alpaca order id means it reached Alpaca paper trading. Use `Sync Orders` to pull recent Alpaca orders back into the board, and `Clear Staged` to remove repeated not-sent Scout ideas.
 
 Use `Clear Chat` beside the `Run` button to clear the command feed without scrolling. The Calendar tab groups saved trade records by day and shows each day's total trades, wins, losses, skipped records, blocked records, and symbols.
 
-The Scout engine calls Alpaca directly for movers, snapshots, assets, account exposure, and news counts. It writes the best candidate to the Trade Board without calling OpenAI. Use `Trade Ticket` or `Execute Paper` only when you want the ChatGPT agent to do deeper reasoning or paper execution.
+The Scout engine calls Alpaca directly for movers, snapshots, assets, account exposure, and news counts. It writes the best candidate to the Trade Board without calling OpenAI. `Execute Paper` now uses the latest staged Scout/ticket row and submits it directly to Alpaca paper trading, so paper execution does not depend on OpenAI quota. Use `Trade Ticket` when you want the ChatGPT agent to do deeper reasoning before execution.
+
+## Alpaca market support
+
+Based on Alpaca's Trading API docs, normal Alpaca trading accounts directly support U.S. equities/ETFs, listed options, and supported crypto spot pairs. Alpaca also exposes forex/currency rate data, but direct spot FX execution is not part of the normal Trading API. Oil and commodities futures are also not direct Trading API execution markets. The dashboard keeps FX and oil on the market screen as context/proxy lanes through listed assets such as `UUP`, `FXE`, `USO`, `BNO`, `XLE`, energy equities, or listed options where available.
 
 For multiple YouTube or news feeds, use comma-separated URLs:
 

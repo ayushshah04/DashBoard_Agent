@@ -96,6 +96,8 @@ async def index() -> FileResponse:
 | `/api/trading/prompts` | GET | Return preset automation prompts |
 | `/api/mcp/registry` | GET | Connect agent temporarily and list MCP servers/tools |
 | `/api/alpaca/account` | GET | Return account funds from Alpaca |
+| `/api/alpaca/orders` | GET | Sync recent Alpaca orders into Trade Board format |
+| `/api/alpaca/paper-order` | POST | Submit one guarded paper order from a staged ticket |
 | `/api/alpaca/scout` | GET | Run Alpaca-first deterministic Scout without OpenAI |
 | `/api/markets/overview` | GET | Return market pulse groups |
 | `/api/markets/movers` | GET | Return top/bottom/active/unusual movers |
@@ -132,7 +134,7 @@ This is lightweight sentiment, not a financial prediction model. It is designed 
 
 ### 5.4 Market Data
 
-Market Pulse and Watchlist data are based on Alpaca REST snapshots when Alpaca keys are configured. Symbols are organized into groups such as US, crypto, FX, bonds, oil, gold, and regional ETFs.
+Market Pulse and Watchlist data are based on Alpaca REST snapshots when Alpaca keys are configured. Symbols are organized into groups such as US, crypto, FX, bonds, oil, gold, and regional ETFs. FX and oil lanes are treated as context/proxy lanes because normal Alpaca Trading API execution supports U.S. equities/ETFs, options, and supported crypto pairs, not direct spot FX or oil futures.
 
 ### 5.5 Video Feed
 
@@ -150,6 +152,20 @@ into iframe-friendly embed URLs.
 `trading_status()` returns risk limits from `current_risk_settings()`. Environment values remain the defaults, and saved dashboard overrides are read from `risk_settings.json` or the path set by `RISK_SETTINGS_PATH`.
 
 `POST /api/risk/settings` accepts `max_order_notional_usd`, `max_position_usd`, `max_daily_loss_usd`, and `options_max_contracts`. The backend clamps each value to configured min/max bounds, writes the normalized settings to `risk_settings.json`, and returns `risk_source=dashboard` so the UI can show that local overrides are active.
+
+### 5.7 Alpaca Paper Execution
+
+`POST /api/alpaca/paper-order` accepts a staged ticket from the dashboard and submits one paper order only when all guardrails pass:
+
+- Alpaca keys are configured.
+- `ALPACA_PAPER_TRADE=true`.
+- Asset class is equity/ETF or crypto.
+- Ticket status is staged/ready and not skipped/blocked.
+- Direction is long-only for direct Scout execution.
+- Risk settings cap notional by max order, max position, and buying power.
+- Equities are checked with `/v2/assets/{symbol}` before order submission.
+
+The route returns a normalized `trade_record` with `order_id` and `api_status`. The frontend writes that into the existing staged row so the Trade Board shows whether the idea actually reached Alpaca. `GET /api/alpaca/orders` pulls recent orders and reconciles them back into local Trade Board rows.
 
 ## 6. Agent Design: `agent.py`
 
@@ -482,7 +498,7 @@ Several calls repeat on intervals:
 - Market movers every 180 seconds.
 - Newsdata every 300 seconds.
 
-The Trade Action Center also has an optional Alpaca-first Scout interval. When enabled, it calls `/api/alpaca/scout` immediately and then every five minutes. Scout cycles do not call OpenAI; they use Alpaca movers, snapshots, assets, account exposure, and news counts, then write the best candidate to the Trade Board.
+The Trade Action Center also has an optional Alpaca-first Scout interval. When enabled, it calls `/api/alpaca/scout` immediately and then every five minutes. Scout cycles do not call OpenAI; they use Alpaca movers, snapshots, assets, account exposure, and news counts, then write or update the best staged candidate in the Trade Board.
 
 ### 11.3 WebSocket Rendering
 
@@ -510,12 +526,13 @@ Then it handles message types:
 The frontend keeps `latestAgentResult`, which is updated from `assistant_text`, `tool_result`, and Alpaca Scout summaries. The trade ticket and paper execution buttons use that context, or fall back to live market/watchlist context when no prior result is available:
 
 - `buildTradeTicketPrompt()` creates a ticket-only prompt.
-- `executePaperTradePrompt()` creates a one-click paper execution prompt with risk constraints.
-- `runContinuousScoutCycle()` calls `/api/alpaca/scout`, renders the best Alpaca candidate, and adds it to the Trade Board without calling OpenAI.
+- `executePaperOrderDirect()` posts the latest staged Trade Board row to `/api/alpaca/paper-order`, then updates that same row with the returned Alpaca order id/status.
+- `loadAlpacaOrders()` calls `/api/alpaca/orders` and reconciles recent Alpaca orders into Trade Board rows.
+- `runContinuousScoutCycle()` calls `/api/alpaca/scout`, renders the best Alpaca candidate, and adds or updates a staged Trade Board row without calling OpenAI.
 
 `submitAgentPrompt()` centralizes prompt submission for the normal form and the agent-backed trade buttons. It uses `agentBusy` to prevent overlapping agent runs. Scout uses a separate `scoutBusy` flag so Alpaca-only cycles do not stack.
 
-The Portfolio Metrics strip and Trade Board render after the account fund strip and use browser `localStorage` under `jarvis-trade-records-v1`. `makeTradeRecord()` adds a row immediately when the user requests a ticket, paper execution, or scout cycle. Agent prompts request a final `TRADE_RECORD` block with `status`, `outcome`, `symbol`, `asset_class`, `direction`, `entry`, `exit_target`, `stop`, `quantity_or_notional`, `order_id`, and `reason`; `updatePendingTradeRecord()` parses that block and updates the row. The board renders every saved record and uses a bounded scroll area with a sticky header for long ticket lists.
+The Portfolio Metrics strip and Trade Board render after the account fund strip and use browser `localStorage` under `jarvis-trade-records-v1`. `makeTradeRecord()` adds a row immediately when the user requests an AI ticket. Scout rows are staged and de-duplicated by symbol/status/entry/day. Agent prompts request a final `TRADE_RECORD` block with `status`, `outcome`, `symbol`, `asset_class`, `direction`, `entry`, `exit_target`, `stop`, `quantity_or_notional`, `order_id`, and `reason`; `updatePendingTradeRecord()` parses that block and updates the row. The board renders saved records with a bounded scroll area, sticky header, and API column that distinguishes `Not sent` from Alpaca order ids.
 
 `renderTradeAnalytics()` derives tracked trades, win rate, win/loss count, average reward/risk ratio, and exposure ratio from saved records plus the latest Alpaca portfolio value. `renderTradeCalendar()` groups the same records by `tradeDate` and renders the Calendar tab with daily totals, wins, losses, skipped records, blocked records, and symbols. `clearChatFeed()` clears only the command feed and latest-result context; it does not delete Trade Board history.
 

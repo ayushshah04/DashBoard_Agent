@@ -123,19 +123,27 @@ Tool calls and tool results stream back to the UI.
 
 ### 7.5.1 Trade Action Center
 
-The Trade Action Center sits under the market/risk cockpit. It captures the latest agent research result and exposes three direct actions:
+The Trade Action Center sits under the market/risk cockpit. It captures the latest agent research or deterministic Scout result and exposes three direct actions:
 
 - `Trade Ticket`: turn the latest result into an execution-ready trade ticket without placing an order.
-- `Execute Paper`: use the latest result to execute at most one small paper trade if paper order tools are available and the setup passes risk checks.
+- `Execute Paper`: submit the latest staged ticket directly to Alpaca paper trading after account, asset, direction, and risk checks pass.
 - `Start Scout` / `Stop Scout`: run an Alpaca-first deterministic scout every five minutes without spending OpenAI credits.
 
-The Portfolio Metrics strip records tracked trades, win rate, win/loss count, reward/risk ratio, and exposure ratio under the funds cards. The Trade Board records recent tickets and execution requests below those metrics. It shows symbol, status, entry, exit/target, stop, size, and last update time in a scrollable table.
+The Portfolio Metrics strip records tracked trades, win rate, win/loss count, reward/risk ratio, and exposure ratio under the funds cards. The Trade Board records recent tickets and execution requests below those metrics. It shows symbol, status, entry, exit/target, stop, size, last update time, and Alpaca API/order status in a scrollable table. Staged Scout rows are de-duplicated by symbol/status/entry/day so repeated cycles update the existing row instead of filling the board.
 
 The `Clear Chat` button stays beside the command `Run` button so the user can reset the chat feed without scrolling. The Calendar tab groups saved trade records by day and shows total trades, wins, losses, skipped records, blocked records, and symbols for each day.
 
 The Risk Management strip lets the user adjust order notional, max position size, daily loss limit, and options contract count without editing `.env`. Saved dashboard overrides update the visible Risk line and are included in future trade-ticket and paper-execution prompts.
 
-The Scout engine uses Alpaca movers, snapshots, assets, account exposure, and news counts to rank candidates. It writes the best candidate to the Trade Board and never executes live trades. The user can then choose `Trade Ticket` or `Execute Paper` to involve the ChatGPT agent.
+The Scout engine uses Alpaca movers, snapshots, assets, account exposure, and news counts to rank candidates. It writes the best candidate to the Trade Board and never executes live trades. The user can then choose `Trade Ticket` for AI research or `Execute Paper` for direct Alpaca paper-order submission.
+
+### 7.5.2 Alpaca Execution Coverage
+
+The product distinguishes market monitoring from direct execution:
+
+- Direct execution: U.S. equities/ETFs, listed U.S. options when explicitly unlocked, and supported crypto spot pairs.
+- Data/proxy lanes: FX/currency and oil/commodities. These remain visible on the dashboard through rates, ETFs, options, and public equities such as `UUP`, `FXE`, `USO`, `BNO`, and `XLE`.
+- Blocked direct execution: spot FX and oil futures through the normal Alpaca Trading API.
 
 ### 7.6 Tools Panel
 
