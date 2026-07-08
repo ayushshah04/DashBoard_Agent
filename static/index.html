@@ -1397,8 +1397,16 @@
         && /(staged|ticket|watch|requested|scout)/i.test(`${record.status || ""} ${record.kind || ""}`);
     }
 
+    function isFakeOrderId(value) {
+      const text = String(value || "").trim().toLowerCase();
+      return !text || text.startsWith("reason") || ["none", "null", "--", "n/a"].includes(text);
+    }
+
     function recordApiText(record) {
-      if (record.orderId) return `Alpaca ${String(record.orderId).slice(0, 8)}`;
+      const orderId = String(record.orderId || "").trim();
+      if (!isFakeOrderId(orderId)) {
+        return `Alpaca ${orderId.slice(0, 8)}`;
+      }
       if (/alpaca reason/i.test(record.apiStatus || "")) return "Not sent";
       if (record.apiStatus) return record.apiStatus;
       if (isStagedRecord(record)) return "Not sent";
@@ -1407,6 +1415,9 @@
 
     function normalizeTradeRecord(record) {
       const normalized = { ...record, tradeDate: normalizeRecordDate(record) };
+      if (isFakeOrderId(normalized.orderId)) {
+        normalized.orderId = "";
+      }
       if (!isSubmittedRecord(normalized) && /^ticket ready$/i.test(normalized.status || "")) {
         normalized.status = "Staged ticket";
         normalized.apiStatus = normalized.apiStatus || "Not sent";
