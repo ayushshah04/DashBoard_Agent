@@ -68,7 +68,7 @@ def _load_config(config_path: str | Path | None) -> dict[str, Any]:
         path = _repo_root() / path
 
     if path.exists():
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
 
     return {
         "mcpServers": {
