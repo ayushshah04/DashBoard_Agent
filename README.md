@@ -104,13 +104,13 @@ The Trade Action Center captures the latest agent research result and lets you:
 
 - Build an execution-ready trade ticket.
 - Execute one small paper trade when paper order tools are available and risk checks pass.
-- Start or stop a continuous paper scout that scans markets every five minutes.
+- Start or stop an Alpaca-first Scout that scans markets every five minutes without using OpenAI credits.
 
 The dashboard adds portfolio metrics under the funds row: tracked trades, win rate, win/loss count, reward/risk ratio, and exposure ratio. The Trade Board sits below those metrics and stores recent tickets/execution requests in the browser with symbol, status, entry, exit/target, stop, size, and update time in a scrollable table. Agent trade prompts ask for a final `TRADE_RECORD` block so those fields can update from the result.
 
 Use `Clear Chat` beside the `Run` button to clear the command feed without scrolling. The Calendar tab groups saved trade records by day and shows each day's total trades, wins, losses, skipped records, blocked records, and symbols.
 
-The continuous scout does not auto-execute live trades. In live mode it prepares a trade ticket unless live tools are explicitly unlocked and the user sends a direct execution request.
+The Scout engine calls Alpaca directly for movers, snapshots, assets, account exposure, and news counts. It writes the best candidate to the Trade Board without calling OpenAI. Use `Trade Ticket` or `Execute Paper` only when you want the ChatGPT agent to do deeper reasoning or paper execution.
 
 For multiple YouTube or news feeds, use comma-separated URLs:
 

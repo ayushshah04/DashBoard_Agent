@@ -1290,6 +1290,7 @@
     let latestAgentResult = "";
     let latestTradeCycle = 0;
     let continuousScoutTimer = null;
+    let scoutBusy = false;
     const continuousScoutIntervalMs = 300000;
     const watchlistKey = "jarvis-watchlist-v1";
     const tradeRecordsKey = "jarvis-trade-records-v1";
@@ -1474,12 +1475,15 @@
       const hasResult = Boolean(latestAgentResult);
       buildTradeTicket.disabled = agentBusy;
       executePaperTrade.disabled = agentBusy;
-      continuousScout.textContent = continuousScoutTimer ? "Stop Scout" : "Start Scout";
+      continuousScout.disabled = scoutBusy;
+      continuousScout.textContent = scoutBusy ? "Scout Running" : (continuousScoutTimer ? "Stop Scout" : "Start Scout");
       continuousScout.classList.toggle("scout-on", Boolean(continuousScoutTimer));
       const mode = Object.keys(tradingConfigCache).length
         ? (tradingConfigCache.paper ? "paper" : (tradingConfigCache.live_trading_enabled ? "live unlocked" : "live locked"))
         : "mode loading";
-      const scout = continuousScoutTimer ? `scout on | every ${Math.round(continuousScoutIntervalMs / 60000)}m` : "scout off";
+      const scout = continuousScoutTimer
+        ? `Alpaca scout on | every ${Math.round(continuousScoutIntervalMs / 60000)}m`
+        : "Alpaca scout off";
       tradeActionStatus.textContent = `${hasResult ? "Last result ready" : "Waiting for research result"} | ${mode} | ${scout}`;
     }
 
@@ -2860,24 +2864,113 @@ END_TRADE_RECORD`;
       }
     }
 
-    function runContinuousScoutCycle() {
-      const prompt = continuousScoutPrompt();
-      if (submitAgentPrompt(prompt, `Continuous scout cycle ${latestTradeCycle}`)) {
-        makeTradeRecord("Scout", prompt);
+    function scoutSummary(data, candidate) {
+      if (!candidate) {
+        return `Alpaca Scout found no risk-ready candidates. Scanned ${data.scanned?.stocks || 0} stocks and ${data.scanned?.crypto || 0} crypto symbols.`;
+      }
+      return `Alpaca-first Scout candidate:
+Symbol: ${candidate.symbol}
+Asset class: ${candidate.asset_class}
+Direction: ${candidate.direction}
+Score: ${candidate.score}
+Status: ${candidate.status}
+Entry: ${candidate.entry}
+Exit target: ${candidate.exit_target}
+Stop: ${candidate.stop}
+Size: ${candidate.size}
+Change: ${formatSignedPercent(candidate.change_percent)}
+Volume ratio: ${candidate.volume_ratio ? formatRatio(candidate.volume_ratio) : "--"}
+News count: ${candidate.news_count || 0}
+Shortable: ${candidate.shortable ? "yes" : "no"}
+Easy to borrow: ${candidate.easy_to_borrow ? "yes" : "no"}
+Reason: ${candidate.reason}
+
+This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticket or Execute Paper when you want agent reasoning or paper execution.`;
+    }
+
+    function addScoutRecord(candidate, cycleNumber) {
+      const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const record = {
+        id: Date.now(),
+        kind: "Alpaca Scout",
+        status: candidate.status || "Watch",
+        outcome: candidate.outcome || "open",
+        symbol: candidate.symbol || "--",
+        direction: candidate.direction || "--",
+        entry: candidate.entry || "--",
+        exitTarget: candidate.exit_target || "--",
+        stop: candidate.stop || "--",
+        size: candidate.size || "--",
+        orderId: "",
+        reason: `Score ${candidate.score || 0}. ${candidate.reason || ""}`,
+        source: `Alpaca Scout cycle ${cycleNumber}. ${JSON.stringify(candidate)}`,
+        tradeDate: todayIsoDate(),
+        createdAt: now,
+        updatedAt: now,
+      };
+      tradeRecords.unshift(record);
+      tradeRecords = tradeRecords.slice(0, 250);
+      pendingTradeRecordId = null;
+      saveTradeRecords();
+      renderTradeBoard();
+    }
+
+    async function runContinuousScoutCycle() {
+      if (scoutBusy) {
+        addActivity("Alpaca Scout cycle skipped: previous cycle still running.");
+        return false;
+      }
+      latestTradeCycle += 1;
+      scoutBusy = true;
+      updateTradeActionState();
+      try {
+        const params = new URLSearchParams({
+          top: "8",
+          include_crypto: "true",
+          symbols: watchedTickers.join(","),
+        });
+        const data = await fetch(`/api/alpaca/scout?${params.toString()}`).then((res) => res.json());
+        if (!data.configured || data.status !== "success") {
+          addActivity(data.message || "Alpaca Scout unavailable.");
+          addBubble(data.message || "Alpaca Scout unavailable.", "tool");
+          return false;
+        }
+        const candidate = data.best || (data.candidates || [])[0];
+        latestAgentResult = scoutSummary(data, candidate);
+        addBubble(latestAgentResult, "tool");
+        if (candidate) {
+          addScoutRecord(candidate, latestTradeCycle);
+          addActivity(`Alpaca Scout picked ${candidate.symbol} (${candidate.score}/100) without OpenAI.`, true);
+        } else {
+          addActivity("Alpaca Scout found no risk-ready candidates.");
+        }
+        (data.warnings || []).forEach((warning) => addActivity(warning));
+        return true;
+      } catch (error) {
+        addActivity(`Alpaca Scout failed: ${error.message}`);
+        addBubble(`Alpaca Scout failed: ${error.message}`, "tool");
+        return false;
+      } finally {
+        scoutBusy = false;
+        updateTradeActionState();
       }
     }
 
-    function toggleContinuousScout() {
+    async function toggleContinuousScout() {
       if (continuousScoutTimer) {
         clearInterval(continuousScoutTimer);
         continuousScoutTimer = null;
-        addActivity("Continuous trade scout stopped.");
+        addActivity("Alpaca-first Scout stopped.");
         updateTradeActionState();
         return;
       }
-      runContinuousScoutCycle();
+      const started = await runContinuousScoutCycle();
+      if (!started) {
+        updateTradeActionState();
+        return;
+      }
       continuousScoutTimer = setInterval(runContinuousScoutCycle, continuousScoutIntervalMs);
-      addActivity("Continuous trade scout started.", true);
+      addActivity("Alpaca-first Scout started. No OpenAI credits used for scout cycles.", true);
       updateTradeActionState();
     }
 

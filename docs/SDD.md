@@ -96,6 +96,7 @@ async def index() -> FileResponse:
 | `/api/trading/prompts` | GET | Return preset automation prompts |
 | `/api/mcp/registry` | GET | Connect agent temporarily and list MCP servers/tools |
 | `/api/alpaca/account` | GET | Return account funds from Alpaca |
+| `/api/alpaca/scout` | GET | Run Alpaca-first deterministic Scout without OpenAI |
 | `/api/markets/overview` | GET | Return market pulse groups |
 | `/api/markets/movers` | GET | Return top/bottom/active/unusual movers |
 | `/api/watchlist/snapshots` | GET | Return watchlist price snapshots |
@@ -455,7 +456,7 @@ It does not require a frontend build system.
 | Fund strip | Portfolio, buying power, cash, equity, account status |
 | Market board | Market Pulse tabs and snapshots |
 | Mover board | Top, bottom, active, unusual volume |
-| Trade Action Center | Latest-result trade ticket, paper execution, continuous scout controls |
+| Trade Action Center | Latest-result trade ticket, paper execution, Alpaca-first Scout controls |
 | Chat feed | User prompts, assistant messages, tool events |
 | Right tabs | Tools, Activity, News, Research, Vault, Video |
 
@@ -481,7 +482,7 @@ Several calls repeat on intervals:
 - Market movers every 180 seconds.
 - Newsdata every 300 seconds.
 
-The Trade Action Center also has an optional continuous scout interval. When enabled, it submits one scout cycle immediately and then every five minutes. If an agent run is still busy when the next cycle fires, that cycle is skipped instead of stacking concurrent WebSocket requests.
+The Trade Action Center also has an optional Alpaca-first Scout interval. When enabled, it calls `/api/alpaca/scout` immediately and then every five minutes. Scout cycles do not call OpenAI; they use Alpaca movers, snapshots, assets, account exposure, and news counts, then write the best candidate to the Trade Board.
 
 ### 11.3 WebSocket Rendering
 
@@ -506,13 +507,13 @@ Then it handles message types:
 
 ### 11.4 Trade Action Center Logic
 
-The frontend keeps `latestAgentResult`, which is updated from `assistant_text` and `tool_result` WebSocket messages. The three trade action buttons use that context, or fall back to live market/watchlist context when no prior result is available:
+The frontend keeps `latestAgentResult`, which is updated from `assistant_text`, `tool_result`, and Alpaca Scout summaries. The trade ticket and paper execution buttons use that context, or fall back to live market/watchlist context when no prior result is available:
 
 - `buildTradeTicketPrompt()` creates a ticket-only prompt.
 - `executePaperTradePrompt()` creates a one-click paper execution prompt with risk constraints.
-- `continuousScoutPrompt()` creates a recurring market-scanning prompt.
+- `runContinuousScoutCycle()` calls `/api/alpaca/scout`, renders the best Alpaca candidate, and adds it to the Trade Board without calling OpenAI.
 
-`submitAgentPrompt()` centralizes prompt submission for the normal form and the trade buttons. It uses `agentBusy` to prevent overlapping runs.
+`submitAgentPrompt()` centralizes prompt submission for the normal form and the agent-backed trade buttons. It uses `agentBusy` to prevent overlapping agent runs. Scout uses a separate `scoutBusy` flag so Alpaca-only cycles do not stack.
 
 The Portfolio Metrics strip and Trade Board render after the account fund strip and use browser `localStorage` under `jarvis-trade-records-v1`. `makeTradeRecord()` adds a row immediately when the user requests a ticket, paper execution, or scout cycle. Agent prompts request a final `TRADE_RECORD` block with `status`, `outcome`, `symbol`, `asset_class`, `direction`, `entry`, `exit_target`, `stop`, `quantity_or_notional`, `order_id`, and `reason`; `updatePendingTradeRecord()` parses that block and updates the row. The board renders every saved record and uses a bounded scroll area with a sticky header for long ticket lists.
 

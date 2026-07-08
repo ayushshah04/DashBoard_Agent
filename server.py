@@ -550,6 +550,27 @@ async def fetch_asset_names(
     return names
 
 
+async def fetch_assets_details(
+    client: httpx.AsyncClient,
+    trading_base_url: str,
+    symbols: list[str],
+) -> dict[str, dict[str, object]]:
+    assets: dict[str, dict[str, object]] = {}
+    semaphore = asyncio.Semaphore(8)
+
+    async def fetch_one(symbol: str) -> None:
+        async with semaphore:
+            try:
+                response = await client.get(f"{trading_base_url}/assets/{symbol}")
+            except httpx.HTTPError:
+                return
+            if not response.is_error:
+                assets[symbol] = response.json()
+
+    await asyncio.gather(*(fetch_one(symbol) for symbol in symbols))
+    return assets
+
+
 async def fetch_screener_movers(
     client: httpx.AsyncClient,
     data_base_url: str,
@@ -610,6 +631,119 @@ def ten_day_volume_ratio(current_volume: object, bars: list[dict[str, object]]) 
         prior = volumes[-10:]
     average = sum(prior) / len(prior)
     return current / average if average else None
+
+
+def trade_side_from_candidate(change_percent: float | None, asset: dict[str, object], kind: str) -> tuple[str, str]:
+    change = change_percent or 0
+    if kind == "crypto":
+        return "long", "Crypto Scout uses long-only paper candidates."
+    if change < -1.5 and asset.get("shortable") and asset.get("easy_to_borrow"):
+        return "short-watch", "Shortable and easy-to-borrow loser with downside momentum."
+    if change < -1.5:
+        return "skip-short", "Downside momentum detected, but shortability is not confirmed."
+    return "long", "Momentum candidate from Alpaca mover/snapshot data."
+
+
+def scout_prices(price: float | None, direction: str, kind: str) -> dict[str, object]:
+    if not price or price <= 0:
+        return {"entry": "--", "stop": "--", "exit_target": "--"}
+    def fmt(value: float) -> str:
+        digits = 4 if value < 1 else 2
+        return f"${value:.{digits}f}"
+
+    risk_pct = 0.015 if kind == "crypto" else 0.01
+    reward_pct = 0.03 if kind == "crypto" else 0.02
+    if direction.startswith("short"):
+        stop = price * (1 + risk_pct)
+        target = price * (1 - reward_pct)
+    else:
+        stop = price * (1 - risk_pct)
+        target = price * (1 + reward_pct)
+    return {
+        "entry": fmt(price),
+        "stop": fmt(stop),
+        "exit_target": fmt(target),
+    }
+
+
+def scout_score(
+    change_percent: float | None,
+    volume_ratio: float | None,
+    news_count: int,
+    direction: str,
+    tradable: bool,
+) -> int:
+    score = 0
+    change = abs(change_percent or 0)
+    score += min(35, int(change * 5))
+    if volume_ratio:
+        score += min(25, int(volume_ratio * 6))
+    score += min(15, news_count * 5)
+    if direction in {"long", "short-watch"}:
+        score += 15
+    if tradable:
+        score += 10
+    return max(0, min(score, 100))
+
+
+def scout_candidate_payload(
+    *,
+    symbol: str,
+    kind: str,
+    snapshot: dict[str, object],
+    asset: dict[str, object] | None = None,
+    source: str,
+    news_count: int = 0,
+    volume_ratio: float | None = None,
+) -> dict[str, object] | None:
+    asset = asset or {}
+    price = (
+        to_float(snapshot_value(snapshot, "latestTrade", "p"))
+        or to_float(snapshot_value(snapshot, "dailyBar", "c"))
+        or to_float(snapshot_value(snapshot, "minuteBar", "c"))
+    )
+    previous = to_float(snapshot_value(snapshot, "prevDailyBar", "c"))
+    if not price:
+        return None
+    change = price - previous if previous else None
+    change_percent = (change / previous * 100) if change is not None and previous else None
+    direction, reason = trade_side_from_candidate(change_percent, asset, kind)
+    tradable = kind == "crypto" or bool(asset.get("tradable", True))
+    prices = scout_prices(price, direction, kind)
+    score = scout_score(change_percent, volume_ratio, news_count, direction, tradable)
+    if direction == "skip-short":
+        status = "Skipped"
+    elif score >= 55:
+        status = "Ticket ready"
+    else:
+        status = "Watch"
+    if not tradable:
+        status = "Blocked"
+        reason = "Asset is not marked tradable by Alpaca."
+
+    return {
+        "symbol": symbol,
+        "asset_class": "crypto" if kind == "crypto" else "equity",
+        "direction": direction,
+        "status": status,
+        "outcome": "skipped" if status in {"Skipped", "Blocked"} else "open",
+        "score": score,
+        "price": price,
+        "change": change,
+        "change_percent": change_percent,
+        "volume": snapshot_value(snapshot, "dailyBar", "v"),
+        "volume_ratio": volume_ratio,
+        "news_count": news_count,
+        "shortable": bool(asset.get("shortable", False)),
+        "easy_to_borrow": bool(asset.get("easy_to_borrow", False)),
+        "tradable": tradable,
+        "entry": prices["entry"],
+        "exit_target": prices["exit_target"],
+        "stop": prices["stop"],
+        "size": "",
+        "source": source,
+        "reason": reason,
+    }
 
 
 def trading_status() -> dict[str, object]:
@@ -708,12 +842,9 @@ async def trading_prompts() -> dict[str, str]:
             f"status, symbol, asset_class, direction, entry, exit_target, stop, quantity_or_notional, order_id, and reason."
         ),
         "continuous_paper_scout": (
-            f"Run one continuous-scout cycle across {markets}. Use market movers, snapshots, watchlist context, "
-            f"Alpaca news, Newsdata.io sentiment, account exposure, and risk limits. If paper trading tools are "
-            f"available, place at most one small paper order only when the setup is strong and within max order "
-            f"notional ${risk['max_order_notional_usd']}. If live mode is active, do not auto-execute; return a "
-            f"trade ticket instead. End with a TRADE_RECORD block containing status, symbol, asset_class, direction, "
-            f"entry, exit_target, stop, quantity_or_notional, order_id, and reason."
+            f"Use /api/alpaca/scout as the primary Scout engine across {markets}. It is Alpaca-first, does not call "
+            f"OpenAI, and returns ranked candidates using movers, snapshots, assets, account exposure, news counts, "
+            f"and risk limits. Only use the agent after a user asks for deeper reasoning, a trade ticket, or paper execution."
         ),
         "live_guarded": (
             f"If and only if live trading is unlocked by the backend, screen {markets}, check news and account risk, "
@@ -967,6 +1098,173 @@ async def markets_movers(top: int = Query(default=5, ge=3, le=10)) -> dict[str, 
         "most_active": most_active,
         "unusual_volume": unusual_rows[:top],
         "warnings": warnings,
+    }
+
+
+@app.get("/api/alpaca/scout")
+async def alpaca_scout(
+    symbols: str | None = Query(default=None),
+    top: int = Query(default=8, ge=3, le=20),
+    include_crypto: bool = Query(default=True),
+) -> dict[str, object]:
+    headers = alpaca_headers()
+    if not headers["APCA-API-KEY-ID"] or not headers["APCA-API-SECRET-KEY"]:
+        return {
+            "configured": False,
+            "status": "missing_keys",
+            "message": "Set ALPACA_API_KEY and ALPACA_SECRET_KEY in .env to run Alpaca Scout.",
+            "candidates": [],
+            "warnings": [],
+        }
+
+    data_base_url = os.getenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets").rstrip("/")
+    trading_base_url = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2").rstrip("/")
+    warnings: list[str] = []
+    requested = symbol_list(symbols, os.getenv("WATCHLIST_SYMBOLS", "TSLA,NVDA,SPY"))
+    crypto_requested = [CRYPTO_SYMBOL_ALIASES.get(symbol, symbol) for symbol in requested if CRYPTO_SYMBOL_ALIASES.get(symbol) or "/" in symbol]
+    stock_requested = [
+        symbol
+        for symbol in requested
+        if not CRYPTO_SYMBOL_ALIASES.get(symbol) and "/" not in symbol
+    ]
+
+    async with httpx.AsyncClient(timeout=25, headers=headers) as client:
+        screener, most_volume, most_trades, account_response, positions_response = await asyncio.gather(
+            fetch_screener_movers(client, data_base_url, max(top, 10), warnings),
+            fetch_most_actives(client, data_base_url, "volume", max(top, 10), warnings),
+            fetch_most_actives(client, data_base_url, "trades", max(top, 10), warnings),
+            client.get(f"{trading_base_url}/account"),
+            client.get(f"{trading_base_url}/positions"),
+        )
+
+        mover_symbols = [
+            str(item.get("symbol", "")).upper()
+            for item in [*screener.get("gainers", []), *screener.get("losers", [])]
+            if item.get("symbol")
+        ]
+        active_symbols = [
+            str(item.get("symbol", "")).upper()
+            for item in [*most_volume.get("most_actives", []), *most_trades.get("most_actives", [])]
+            if item.get("symbol")
+        ]
+        stock_symbols = symbol_list(",".join([*stock_requested, *mover_symbols, *active_symbols]))[:80]
+        crypto_symbols = symbol_list(",".join([*crypto_requested, "BTC/USD", "ETH/USD", "SOL/USD"])) if include_crypto else []
+
+        stocks_task = fetch_stock_snapshots(client, data_base_url, stock_symbols, warnings)
+        assets_task = fetch_assets_details(client, trading_base_url, stock_symbols)
+        bars_task = fetch_daily_bars(client, data_base_url, stock_symbols, warnings)
+        news_task = client.get(
+            f"{data_base_url}/v1beta1/news",
+            params={"symbols": ",".join(stock_symbols[:50]), "limit": 50, "sort": "desc"} if stock_symbols else {"limit": 1},
+        )
+        crypto_task = client.get(
+            f"{data_base_url}/v1beta3/crypto/us/snapshots",
+            params={"symbols": ",".join(crypto_symbols)},
+        ) if crypto_symbols else None
+
+        if crypto_task:
+            stock_snapshots, assets, bars, news_response, crypto_response = await asyncio.gather(
+                stocks_task, assets_task, bars_task, news_task, crypto_task
+            )
+            if crypto_response.is_error:
+                warnings.append(f"Alpaca crypto scout snapshots returned HTTP {crypto_response.status_code}.")
+                crypto_snapshots: dict[str, dict[str, object]] = {}
+            else:
+                crypto_snapshots = crypto_response.json().get("snapshots", {})
+        else:
+            stock_snapshots, assets, bars, news_response = await asyncio.gather(
+                stocks_task, assets_task, bars_task, news_task
+            )
+            crypto_snapshots = {}
+
+    account = account_response.json() if not account_response.is_error else {}
+    positions = positions_response.json() if not positions_response.is_error else []
+    held_symbols = {
+        str(position.get("symbol", "")).upper(): position
+        for position in positions
+        if isinstance(position, dict) and position.get("symbol")
+    }
+    buying_power = to_float(account.get("buying_power")) or 0
+    risk_settings = current_risk_settings()
+    max_order = to_float(risk_settings.get("max_order_notional_usd")) or 50
+    paper_mode = env_bool("ALPACA_PAPER_TRADE", True)
+
+    news_counts: dict[str, int] = {}
+    if news_response.is_error:
+        warnings.append(f"Alpaca scout news returned HTTP {news_response.status_code}.")
+    else:
+        for item in news_response.json().get("news", []):
+            for symbol in item.get("symbols", []) or []:
+                ticker = str(symbol).upper()
+                news_counts[ticker] = news_counts.get(ticker, 0) + 1
+
+    volume_by_symbol = {
+        str(item.get("symbol", "")).upper(): item.get("volume")
+        for item in [*most_volume.get("most_actives", []), *most_trades.get("most_actives", [])]
+        if item.get("symbol")
+    }
+    candidate_map: dict[str, dict[str, object]] = {}
+    for symbol in stock_symbols:
+        snapshot = stock_snapshots.get(symbol, {})
+        current_volume = volume_by_symbol.get(symbol) or snapshot_value(snapshot, "dailyBar", "v")
+        ratio = ten_day_volume_ratio(current_volume, bars.get(symbol, []))
+        source_parts = []
+        if symbol in stock_requested:
+            source_parts.append("watchlist")
+        if symbol in mover_symbols:
+            source_parts.append("mover")
+        if symbol in active_symbols:
+            source_parts.append("active")
+        candidate = scout_candidate_payload(
+            symbol=symbol,
+            kind="stock",
+            snapshot=snapshot,
+            asset=assets.get(symbol),
+            source=", ".join(source_parts) or "snapshot",
+            news_count=news_counts.get(symbol, 0),
+            volume_ratio=ratio,
+        )
+        if not candidate:
+            continue
+        if symbol in held_symbols:
+            candidate["held_position"] = True
+            candidate["reason"] = f"{candidate['reason']} Existing position detected."
+        candidate["size"] = f"${min(max_order, buying_power):.2f} paper notional max"
+        candidate_map[symbol] = candidate
+
+    for symbol, snapshot in crypto_snapshots.items():
+        candidate = scout_candidate_payload(
+            symbol=symbol,
+            kind="crypto",
+            snapshot=snapshot,
+            source="crypto snapshot",
+            news_count=0,
+            volume_ratio=None,
+        )
+        if not candidate:
+            continue
+        candidate["size"] = f"${min(max_order, buying_power):.2f} paper notional max"
+        candidate_map[symbol] = candidate
+
+    candidates = sorted(candidate_map.values(), key=lambda item: int(item.get("score") or 0), reverse=True)[:top]
+    best = candidates[0] if candidates else None
+    return {
+        "configured": True,
+        "status": "success",
+        "engine": "alpaca-first",
+        "uses_openai": False,
+        "mode": "paper" if paper_mode else "live-locked",
+        "risk": risk_settings,
+        "buying_power": buying_power,
+        "scanned": {
+            "stocks": len(stock_symbols),
+            "crypto": len(crypto_symbols),
+            "watchlist": requested,
+        },
+        "best": best,
+        "candidates": candidates,
+        "warnings": warnings,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
     }
 
 

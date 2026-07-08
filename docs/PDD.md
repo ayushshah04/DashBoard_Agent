@@ -127,7 +127,7 @@ The Trade Action Center sits under the market/risk cockpit. It captures the late
 
 - `Trade Ticket`: turn the latest result into an execution-ready trade ticket without placing an order.
 - `Execute Paper`: use the latest result to execute at most one small paper trade if paper order tools are available and the setup passes risk checks.
-- `Start Scout` / `Stop Scout`: run a continuous paper scout every five minutes to scan configured markets and watchlist names for the best risk-adjusted setup.
+- `Start Scout` / `Stop Scout`: run an Alpaca-first deterministic scout every five minutes without spending OpenAI credits.
 
 The Portfolio Metrics strip records tracked trades, win rate, win/loss count, reward/risk ratio, and exposure ratio under the funds cards. The Trade Board records recent tickets and execution requests below those metrics. It shows symbol, status, entry, exit/target, stop, size, and last update time in a scrollable table.
 
@@ -135,7 +135,7 @@ The `Clear Chat` button stays beside the command `Run` button so the user can re
 
 The Risk Management strip lets the user adjust order notional, max position size, daily loss limit, and options contract count without editing `.env`. Saved dashboard overrides update the visible Risk line and are included in future trade-ticket and paper-execution prompts.
 
-The continuous scout is designed for paper automation. If the system is in live mode, it returns a trade ticket instead of silently placing live orders.
+The Scout engine uses Alpaca movers, snapshots, assets, account exposure, and news counts to rank candidates. It writes the best candidate to the Trade Board and never executes live trades. The user can then choose `Trade Ticket` or `Execute Paper` to involve the ChatGPT agent.
 
 ### 7.6 Tools Panel
 
