@@ -81,6 +81,10 @@ def risk(order="50", position="100", daily_loss="250", options="1"):
     }
 
 
+def no_open_orders():
+    return ("/orders", FakeResponse([]))
+
+
 class TradingRegressionTests(unittest.TestCase):
     def test_risk_settings_clamp_and_format(self):
         normalized = server.normalize_risk_settings(
@@ -110,6 +114,13 @@ class TradingRegressionTests(unittest.TestCase):
         self.assertEqual(market_support["FX/currency"], "data_or_proxy_only")
         self.assertEqual(market_support["Oil and commodities"], "proxy_only")
 
+    def test_asset_class_inference_distinguishes_crypto_and_fx(self):
+        self.assertEqual(server.infer_asset_class("BTC/USD", {}), "crypto")
+        self.assertEqual(server.infer_asset_class("ETH/USD", {}), "crypto")
+        self.assertEqual(server.infer_asset_class("EUR/USD", {}), "currency")
+        self.assertEqual(server.infer_asset_class("FXE", {"asset_class": "equity"}), "equity")
+        self.assertEqual(server.infer_asset_class("TSLA250117C00400000", {"asset_class": "option"}), "option")
+
     def test_order_record_normalizes_accepted_and_filled_status(self):
         accepted = server.alpaca_order_trade_record(
             {
@@ -118,7 +129,9 @@ class TradingRegressionTests(unittest.TestCase):
                 "status": "accepted",
                 "side": "buy",
                 "qty": "85",
+                "filled_qty": "0",
                 "submitted_at": "2026-07-08T21:02:49Z",
+                "expires_at": "2026-07-09T20:00:00Z",
             }
         )
         filled = server.alpaca_order_trade_record(
@@ -128,15 +141,18 @@ class TradingRegressionTests(unittest.TestCase):
                 "status": "filled",
                 "side": "buy",
                 "notional": "49",
+                "filled_qty": "0.35758602",
                 "filled_avg_price": "83.538",
             }
         )
         self.assertEqual(accepted["status"], "Alpaca Accepted")
-        self.assertEqual(accepted["quantity_or_notional"], "85 qty")
+        self.assertEqual(accepted["quantity_or_notional"], "85 qty / filled 0/85")
         self.assertEqual(accepted["api_status"], "accepted")
+        self.assertEqual(accepted["filled_qty"], "0")
+        self.assertEqual(accepted["expires_at"], "2026-07-09T20:00:00Z")
         self.assertEqual(filled["status"], "Alpaca Filled")
         self.assertEqual(filled["entry"], "$83.538")
-        self.assertEqual(filled["quantity_or_notional"], "$49 notional")
+        self.assertEqual(filled["quantity_or_notional"], "$49 notional / filled 0.35758602")
 
     def test_orders_endpoint_syncs_trade_records(self):
         client = FakeAsyncClient(
@@ -177,6 +193,14 @@ class TradingRegressionTests(unittest.TestCase):
         with fake_env():
             result = async_run(
                 server.alpaca_paper_order({"symbol": "TSLA250117C00400000", "asset_class": "option", "status": "Staged ticket"})
+            )
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("supports Alpaca equities/ETFs and crypto only", result["message"])
+
+    def test_paper_order_blocks_direct_fx_pair(self):
+        with fake_env():
+            result = async_run(
+                server.alpaca_paper_order({"symbol": "EUR/USD", "asset_class": "currency", "status": "Staged ticket", "size": "$25"})
             )
         self.assertEqual(result["status"], "blocked")
         self.assertIn("supports Alpaca equities/ETFs and crypto only", result["message"])
@@ -244,6 +268,7 @@ class TradingRegressionTests(unittest.TestCase):
             get_routes=[
                 ("/account", FakeResponse({"buying_power": "5000"})),
                 ("/assets/TSLA", FakeResponse({"tradable": True, "fractionable": True})),
+                no_open_orders(),
             ],
             post_routes=[("/orders", FakeResponse(order_payload))],
         )
@@ -259,11 +284,90 @@ class TradingRegressionTests(unittest.TestCase):
         self.assertNotIn("client_order_id", result["trade_record"])
         self.assertEqual(result["trade_record"]["order_id"], "order-1")
 
+    def test_paper_order_dry_run_validates_equity_without_posting(self):
+        client = FakeAsyncClient(
+            get_routes=[
+                ("/account", FakeResponse({"buying_power": "5000"})),
+                ("/assets/TSLA", FakeResponse({"tradable": True, "fractionable": True})),
+                no_open_orders(),
+            ]
+        )
+        with fake_env(), patch.object(server.httpx, "AsyncClient", lambda *args, **kwargs: client), patch.object(
+            server, "current_risk_settings", return_value=risk(order="10000", position="100")
+        ):
+            result = async_run(
+                server.alpaca_paper_order(
+                    {"symbol": "TSLA", "asset_class": "equity", "status": "Staged ticket", "size": "$10000", "dry_run": True}
+                )
+            )
+        self.assertEqual(result["status"], "validated")
+        self.assertEqual(result["request"]["symbol"], "TSLA")
+        self.assertEqual(result["request"]["notional"], "100.00")
+        self.assertEqual(client.post_calls, [])
+
+    def test_paper_order_blocks_duplicate_open_order_for_same_symbol(self):
+        existing_order = {
+            "id": "open-vtak",
+            "symbol": "VTAK",
+            "status": "accepted",
+            "side": "buy",
+            "qty": "85",
+            "filled_qty": "0",
+        }
+        client = FakeAsyncClient(
+            get_routes=[
+                ("/account", FakeResponse({"buying_power": "5000"})),
+                ("/assets/VTAK", FakeResponse({"tradable": True, "fractionable": False})),
+                ("/orders", FakeResponse([existing_order])),
+            ]
+        )
+        with fake_env(), patch.object(server.httpx, "AsyncClient", lambda *args, **kwargs: client), patch.object(
+            server, "current_risk_settings", return_value=risk(order="10000", position="100")
+        ):
+            result = async_run(
+                server.alpaca_paper_order(
+                    {
+                        "symbol": "VTAK",
+                        "asset_class": "equity",
+                        "status": "Staged ticket",
+                        "entry": "$1.17",
+                        "size": "$10000 paper notional max",
+                    }
+                )
+            )
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("Open Alpaca order already exists for VTAK", result["message"])
+        self.assertEqual(result["existing_order"]["id"], "open-vtak")
+        self.assertEqual(result["trade_record"]["quantity_or_notional"], "85 qty / filled 0/85")
+        self.assertEqual(client.post_calls, [])
+
+    def test_paper_order_dry_run_validates_fx_proxy_equity_without_posting(self):
+        client = FakeAsyncClient(
+            get_routes=[
+                ("/account", FakeResponse({"buying_power": "5000"})),
+                ("/assets/FXE", FakeResponse({"tradable": True, "fractionable": True})),
+                no_open_orders(),
+            ]
+        )
+        with fake_env(), patch.object(server.httpx, "AsyncClient", lambda *args, **kwargs: client), patch.object(
+            server, "current_risk_settings", return_value=risk(order="50", position="100")
+        ):
+            result = async_run(
+                server.alpaca_paper_order(
+                    {"symbol": "FXE", "asset_class": "equity", "status": "Staged ticket", "size": "$50", "dry_run": True}
+                )
+            )
+        self.assertEqual(result["status"], "validated")
+        self.assertEqual(result["asset_class"], "equity")
+        self.assertEqual(result["request"]["symbol"], "FXE")
+        self.assertEqual(client.post_calls, [])
+
     def test_paper_order_submits_nonfractionable_equity_quantity(self):
         client = FakeAsyncClient(
             get_routes=[
                 ("/account", FakeResponse({"buying_power": "1000"})),
                 ("/assets/XYZ", FakeResponse({"tradable": True, "fractionable": False})),
+                no_open_orders(),
             ],
             post_routes=[("/orders", FakeResponse({"id": "order-qty", "symbol": "XYZ", "status": "accepted", "side": "buy", "qty": "4"}))],
         )
@@ -278,7 +382,7 @@ class TradingRegressionTests(unittest.TestCase):
 
     def test_paper_order_submits_crypto_gtc(self):
         client = FakeAsyncClient(
-            get_routes=[("/account", FakeResponse({"buying_power": "5000"}))],
+            get_routes=[("/account", FakeResponse({"buying_power": "5000"})), no_open_orders()],
             post_routes=[("/orders", FakeResponse({"id": "crypto-1", "symbol": "BTC/USD", "status": "accepted", "side": "buy", "notional": "25.00"}))],
         )
         with fake_env(), patch.object(server.httpx, "AsyncClient", lambda *args, **kwargs: client), patch.object(
@@ -289,13 +393,29 @@ class TradingRegressionTests(unittest.TestCase):
         sent = client.post_calls[0][1]["json"]
         self.assertEqual(sent["time_in_force"], "gtc")
         self.assertEqual(sent["notional"], "25.00")
-        self.assertEqual(len(client.get_calls), 1)
+        self.assertEqual(len(client.get_calls), 2)
+
+    def test_paper_order_dry_run_validates_crypto_without_posting(self):
+        client = FakeAsyncClient(get_routes=[("/account", FakeResponse({"buying_power": "5000"})), no_open_orders()])
+        with fake_env(), patch.object(server.httpx, "AsyncClient", lambda *args, **kwargs: client), patch.object(
+            server, "current_risk_settings", return_value=risk(order="25", position="100")
+        ):
+            result = async_run(
+                server.alpaca_paper_order(
+                    {"symbol": "BTC/USD", "asset_class": "crypto", "status": "Staged ticket", "size": "$25", "dry_run": True}
+                )
+            )
+        self.assertEqual(result["status"], "validated")
+        self.assertEqual(result["asset_class"], "crypto")
+        self.assertEqual(result["request"]["time_in_force"], "gtc")
+        self.assertEqual(client.post_calls, [])
 
     def test_paper_order_returns_rejection_without_client_order_id(self):
         client = FakeAsyncClient(
             get_routes=[
                 ("/account", FakeResponse({"buying_power": "1000"})),
                 ("/assets/TSLA", FakeResponse({"tradable": True, "fractionable": True})),
+                no_open_orders(),
             ],
             post_routes=[("/orders", FakeResponse({"message": "market closed"}, status_code=422, text="market closed"))],
         )

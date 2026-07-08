@@ -1405,7 +1405,8 @@
     function recordApiText(record) {
       const orderId = String(record.orderId || "").trim();
       if (!isFakeOrderId(orderId)) {
-        return `Alpaca ${orderId.slice(0, 8)}`;
+        const api = record.apiStatus && record.apiStatus !== "synced" ? ` | ${record.apiStatus}` : "";
+        return `Alpaca ${orderId.slice(0, 8)}${api}`;
       }
       if (/alpaca reason/i.test(record.apiStatus || "")) return "Not sent";
       if (record.apiStatus) return record.apiStatus;
@@ -1584,6 +1585,7 @@
         status: remote.status || "Alpaca order",
         outcome: remote.outcome || "open",
         symbol,
+        assetClass: remote.asset_class || remote.assetClass || "",
         direction: remote.direction || "--",
         entry: remote.entry || "market",
         exitTarget: remote.exit_target || remote.exitTarget || "--",
@@ -1592,7 +1594,11 @@
         orderId,
         apiStatus: remote.api_status || remote.apiStatus || "synced",
         reason: remote.reason || "Synced from Alpaca orders.",
-        updatedAt: now,
+        submittedAt: remote.submitted_at || remote.submittedAt || "",
+        filledAt: remote.filled_at || remote.filledAt || "",
+        expiresAt: remote.expires_at || remote.expiresAt || "",
+        filledQty: remote.filled_qty || remote.filledQty || "",
+        updatedAt: formatTradeTime(remote.updated_at || remote.submitted_at || remote.updatedAt || remote.submittedAt) || now,
       };
       if (record) {
         Object.assign(record, update);
@@ -2134,6 +2140,18 @@
         currency,
         maximumFractionDigits: 2,
       }).format(number);
+    }
+
+    function formatTradeTime(value) {
+      if (!value) return "";
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return String(value);
+      return date.toLocaleString([], {
+        month: "numeric",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
     }
 
     function formatMarketNumber(value, digits = 2) {

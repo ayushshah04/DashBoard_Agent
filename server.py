@@ -115,10 +115,17 @@ def normalize_order_symbol(symbol: object) -> str:
 
 def infer_asset_class(symbol: str, candidate: dict[str, object]) -> str:
     raw = str(candidate.get("asset_class") or candidate.get("assetClass") or "").strip().lower()
-    if "crypto" in raw or "/" in symbol:
+    if "fx" in raw or "forex" in raw or "currency" in raw:
+        return "currency"
+    if "crypto" in raw:
         return "crypto"
     if "option" in raw:
         return "option"
+    if "/" in symbol:
+        base = symbol.split("/", 1)[0]
+        if base in {"BTC", "ETH", "SOL", "DOGE"}:
+            return "crypto"
+        return "currency"
     return "equity"
 
 
@@ -127,6 +134,26 @@ def order_status_label(status: object) -> str:
     if not value:
         return "Paper submitted"
     return f"Alpaca {value.title()}"
+
+
+ACTIVE_ALPACA_ORDER_STATUSES = {
+    "accepted",
+    "accepted_for_bidding",
+    "calculated",
+    "held",
+    "new",
+    "partially_filled",
+    "pending_cancel",
+    "pending_new",
+    "pending_replace",
+    "replaced",
+    "stopped",
+    "suspended",
+}
+
+
+def is_active_alpaca_order(order: dict[str, object]) -> bool:
+    return str(order.get("status") or "").lower() in ACTIVE_ALPACA_ORDER_STATUSES
 
 
 RISK_LIMITS: dict[str, dict[str, object]] = {
@@ -476,13 +503,18 @@ def to_float(value: object) -> float | None:
 def alpaca_order_trade_record(order: dict[str, object], reason: str = "Synced from Alpaca orders.") -> dict[str, object]:
     symbol = normalize_order_symbol(order.get("symbol"))
     submitted = str(order.get("submitted_at") or order.get("created_at") or "")
+    updated = str(order.get("updated_at") or submitted)
+    expires = str(order.get("expires_at") or "")
+    filled_at = str(order.get("filled_at") or "")
     filled_price = order.get("filled_avg_price")
+    filled_qty = order.get("filled_qty")
     limit_price = order.get("limit_price")
     stop_price = order.get("stop_price")
     notional = order.get("notional")
     qty = order.get("qty")
     order_id = str(order.get("id") or "")
-    status = order_status_label(order.get("status"))
+    api_status = str(order.get("status") or "submitted")
+    status = order_status_label(api_status)
     side = str(order.get("side") or "").lower()
     asset_class = str(order.get("asset_class") or ("crypto" if "/" in symbol else "equity"))
     size_parts = []
@@ -490,9 +522,19 @@ def alpaca_order_trade_record(order: dict[str, object], reason: str = "Synced fr
         size_parts.append(f"{qty} qty")
     if notional not in {None, ""}:
         size_parts.append(f"${notional} notional")
+    if filled_qty not in {None, ""}:
+        if qty not in {None, ""}:
+            size_parts.append(f"filled {filled_qty}/{qty}")
+        else:
+            size_parts.append(f"filled {filled_qty}")
+    reason_parts = [reason, f"Status {api_status}"]
+    if submitted:
+        reason_parts.append(f"submitted {submitted}")
+    if expires:
+        reason_parts.append(f"expires {expires}")
     return {
         "status": status,
-        "outcome": "open" if str(order.get("status") or "").lower() not in {"rejected", "canceled", "expired"} else "blocked",
+        "outcome": "open" if api_status.lower() not in {"rejected", "canceled", "expired"} else "blocked",
         "symbol": symbol,
         "asset_class": asset_class,
         "direction": "long" if side == "buy" else side or "--",
@@ -501,9 +543,15 @@ def alpaca_order_trade_record(order: dict[str, object], reason: str = "Synced fr
         "stop": f"${stop_price}" if stop_price not in {None, ""} else "--",
         "quantity_or_notional": " / ".join(size_parts) or "--",
         "order_id": order_id,
-        "api_status": str(order.get("status") or "submitted"),
+        "api_status": api_status,
         "submitted_at": submitted,
-        "reason": reason,
+        "updated_at": updated,
+        "filled_at": filled_at,
+        "expires_at": expires,
+        "filled_qty": str(filled_qty or ""),
+        "order_type": str(order.get("type") or order.get("order_type") or ""),
+        "time_in_force": str(order.get("time_in_force") or ""),
+        "reason": "; ".join(part for part in reason_parts if part),
     }
 
 
@@ -1160,6 +1208,50 @@ async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[s
                     return {"status": "blocked", "message": f"Risk limit ${notional:.2f} is too small to buy one share of {symbol}."}
                 order_payload.pop("notional", None)
                 order_payload["qty"] = str(qty)
+
+        open_orders_response = await client.get(
+            f"{base_url}/orders",
+            params={"status": "open", "limit": 100, "direction": "desc"},
+        )
+        if open_orders_response.is_error:
+            return {
+                "status": "blocked",
+                "message": f"Could not verify open Alpaca orders before execution (HTTP {open_orders_response.status_code}). No new order submitted.",
+            }
+        open_orders = open_orders_response.json()
+        if not isinstance(open_orders, list):
+            open_orders = []
+        duplicate_order = next(
+            (
+                order
+                for order in open_orders
+                if isinstance(order, dict)
+                and normalize_order_symbol(order.get("symbol")) == symbol
+                and is_active_alpaca_order(order)
+            ),
+            None,
+        )
+        if duplicate_order:
+            order_id = str(duplicate_order.get("id") or "--")
+            api_status = str(duplicate_order.get("status") or "open")
+            return {
+                "status": "blocked",
+                "message": f"Open Alpaca order already exists for {symbol} ({api_status}, {order_id}). No duplicate paper order submitted.",
+                "existing_order": duplicate_order,
+                "trade_record": alpaca_order_trade_record(duplicate_order, reason="Existing open Alpaca order blocked duplicate execution."),
+                "request": {key: value for key, value in order_payload.items() if key != "client_order_id"},
+            }
+
+        if candidate.get("dry_run") or candidate.get("validate_only"):
+            return {
+                "status": "validated",
+                "message": f"Paper order validation passed for {symbol}; no order submitted.",
+                "request": {key: value for key, value in order_payload.items() if key != "client_order_id"},
+                "asset_class": asset_class,
+                "risk": risk_settings,
+                "buying_power": buying_power,
+                "supported_markets": ALPACA_EXECUTION_MARKETS,
+            }
 
         response = await client.post(f"{base_url}/orders", json=order_payload)
         if response.is_error:
