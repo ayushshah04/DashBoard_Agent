@@ -1091,6 +1091,7 @@
       <div class="panel-tabs">
         <button class="active" data-panel="panel-tools" type="button">Tools</button>
         <button data-panel="panel-activity" type="button">Activity</button>
+        <button data-panel="panel-quant" type="button">Quant</button>
         <button data-panel="panel-news" type="button">News</button>
         <button data-panel="panel-research" type="button">Research</button>
         <button data-panel="panel-vault" type="button">Vault</button>
@@ -1104,6 +1105,20 @@
       <section class="dock-panel" id="panel-activity">
         <h2>Live Activity</h2>
         <div class="list" id="activity"></div>
+      </section>
+      <section class="dock-panel" id="panel-quant">
+        <h2>Factor Score</h2>
+        <div class="list" id="quantFactorScore"></div>
+        <h2>Backtest</h2>
+        <div class="list" id="quantBacktest"></div>
+        <h2>Risk Sizing</h2>
+        <div class="list" id="quantRiskSizing"></div>
+        <h2>Signal History</h2>
+        <div class="list" id="quantSignalHistory"></div>
+        <h2>Model Confidence</h2>
+        <div class="list" id="quantModelConfidence"></div>
+        <h2>Why This Trade</h2>
+        <div class="list" id="quantWhyTrade"></div>
       </section>
       <section class="dock-panel" id="panel-news">
         <h2>News Factor Screen</h2>
@@ -1273,6 +1288,12 @@
     const analyzeOptions = document.querySelector("#analyzeOptions");
     const optionsFactors = document.querySelector("#optionsFactors");
     const promptButtons = document.querySelector("#promptButtons");
+    const quantFactorScore = document.querySelector("#quantFactorScore");
+    const quantBacktest = document.querySelector("#quantBacktest");
+    const quantRiskSizing = document.querySelector("#quantRiskSizing");
+    const quantSignalHistory = document.querySelector("#quantSignalHistory");
+    const quantModelConfidence = document.querySelector("#quantModelConfidence");
+    const quantWhyTrade = document.querySelector("#quantWhyTrade");
     const vaultTitle = document.querySelector("#vaultTitle");
     const vaultTickers = document.querySelector("#vaultTickers");
     const vaultType = document.querySelector("#vaultType");
@@ -1335,6 +1356,24 @@
       div.className = `pill ${hot ? "hot" : ""}`;
       div.textContent = text;
       activityEl.prepend(div);
+    }
+
+    function renderPillList(container, rows, hot = false) {
+      if (!container) return;
+      container.innerHTML = "";
+      if (!rows.length) {
+        const empty = document.createElement("div");
+        empty.className = "pill";
+        empty.textContent = "--";
+        container.appendChild(empty);
+        return;
+      }
+      rows.forEach((row) => {
+        const div = document.createElement("div");
+        div.className = `pill ${hot ? "hot" : ""}`;
+        div.textContent = row;
+        container.appendChild(div);
+      });
     }
 
     function compactAgentContext(text) {
@@ -1568,8 +1607,8 @@
         ? (tradingConfigCache.paper ? "paper" : (tradingConfigCache.live_trading_enabled ? "live unlocked" : "live locked"))
         : "mode loading";
       const scout = continuousScoutTimer
-        ? `Alpaca scout on | every ${Math.round(continuousScoutIntervalMs / 60000)}m`
-        : "Alpaca scout off";
+        ? `Quant Scout on | every ${Math.round(continuousScoutIntervalMs / 60000)}m`
+        : "Quant Scout off";
       tradeActionStatus.textContent = `${hasResult ? "Last result ready" : "Waiting for research result"} | ${mode} | ${scout}`;
     }
 
@@ -3046,6 +3085,11 @@ END_TRADE_RECORD`;
         stop: record.stop,
         size: record.size,
         quantity_or_notional: record.size,
+        suggested_order_type: record.suggestedOrderType,
+        order_type: record.suggestedOrderType,
+        limit_price: record.limitPrice,
+        spread_percent: record.spreadPercent,
+        max_allowed_spread_percent: record.maxAllowedSpreadPercent,
         reason: record.reason,
       };
     }
@@ -3130,17 +3174,70 @@ END_TRADE_RECORD`;
       await executePaperOrderDirect(record);
     }
 
+    function renderQuantDashboard(data, candidate) {
+      const selected = candidate || (data.candidates || [])[0] || {};
+      const factors = selected.factor_scores || {};
+      const backtest = selected.backtest_metrics || {};
+      const risk = selected.risk || {};
+      const execution = selected.execution_quality || {};
+      const portfolio = selected.portfolio || {};
+      const confidence = selected.model_confidence || {};
+      const penalty = selected.risk_penalty || {};
+      renderPillList(quantFactorScore, [
+        `Momentum ${factors.momentum ?? "--"}`,
+        `Volume surprise ${factors.volume_surprise ?? "--"}`,
+        `Volatility ${factors.volatility ?? "--"}`,
+        `Liquidity ${factors.liquidity ?? "--"}`,
+        `News sentiment ${factors.news_sentiment ?? "--"} (${selected.news_sentiment || "neutral"})`,
+        `Trend ${factors.trend ?? "--"} (${selected.trend_metrics?.label || "--"})`,
+        `Risk quality ${factors.risk_quality ?? "--"}`,
+        `Risk penalty ${penalty.score ?? 0}`,
+      ], true);
+      renderPillList(quantBacktest, [
+        `Status ${backtest.status || "--"}`,
+        `Sample ${backtest.sample_size ?? "--"}`,
+        `Win rate ${backtest.win_rate_percent ?? "--"}%`,
+        `Average return ${backtest.average_return_percent ?? "--"}%`,
+        `Max drawdown ${backtest.max_drawdown_percent ?? "--"}%`,
+        `Sharpe proxy ${backtest.sharpe_proxy ?? "--"}`,
+        `Profit factor ${backtest.profit_factor ?? "--"}`,
+      ]);
+      renderPillList(quantRiskSizing, [
+        risk.display_size || selected.size || "--",
+        `Formula ${risk.formula || "shares = max_risk_per_trade / abs(entry - stop)"}`,
+        `Max risk ${formatMoney(risk.max_risk_usd || 0)}`,
+        `Risk/unit ${risk.risk_per_unit ?? "--"}`,
+        `Spread ${execution.spread_percent ?? "--"}% / max ${execution.max_allowed_spread_percent ?? "--"}%`,
+        `Order ${execution.recommended_order_type || "--"} ${execution.limit_price ? `@ ${execution.limit_price}` : ""}`,
+      ]);
+      renderPillList(quantSignalHistory, (data.candidates || []).slice(0, 8).map((item) => (
+        `${item.quant_rank || "--"}. ${item.symbol || "--"} | q ${item.quant_score ?? item.score ?? "--"} | ${item.status || "--"} | ${item.suggested_order_type || item.execution_quality?.recommended_order_type || "--"}`
+      )));
+      renderPillList(quantModelConfidence, [
+        `${confidence.label || "--"} (${confidence.score ?? "--"}/100)`,
+        `Portfolio sector ${portfolio.sector || "--"} ${portfolio.sector_exposure_percent ?? "--"}%`,
+        `Correlation ${portfolio.max_correlation ?? "--"}`,
+        `Daily loss ${formatMoney(portfolio.daily_loss_usd || 0)} / ${formatMoney(portfolio.daily_loss_limit_usd || 0)}`,
+        `Open order ${portfolio.open_order ? "yes" : "no"}`,
+      ], (confidence.score || 0) >= 70);
+      renderPillList(quantWhyTrade, [
+        selected.reason || "--",
+        execution.reason || "--",
+        penalty.reasons?.length ? `Penalty: ${penalty.reasons.join(", ")}` : "No major penalty flags",
+      ]);
+    }
+
     function scoutSummary(data, candidate) {
       const candidates = Array.isArray(data.candidates) ? data.candidates.slice(0, 8) : [];
       if (!candidate && !candidates.length) {
         return `Alpaca Scout found no risk-ready candidates. Scanned ${data.scanned?.stocks || 0} stocks and ${data.scanned?.crypto || 0} crypto symbols.`;
       }
-      const engineName = data.engine === "quant-v1" ? "Quant Scout" : "Alpaca-first Scout";
+      const engineName = data.engine && data.engine.startsWith("quant") ? "Quant Scout" : "Alpaca-first Scout";
       const selected = candidate || candidates[0];
       const factorText = (item) => {
         const factors = item.factor_scores || {};
         if (!Object.keys(factors).length) return "factors --";
-        return `factors M${factors.momentum ?? "--"} V${factors.volume ?? "--"} L${factors.liquidity ?? "--"} R${factors.risk_quality ?? "--"}`;
+        return `factors M${factors.momentum ?? "--"} VS${factors.volume_surprise ?? "--"} Vol${factors.volatility ?? "--"} L${factors.liquidity ?? "--"} S${factors.news_sentiment ?? "--"} T${factors.trend ?? "--"} R${factors.risk_quality ?? "--"}`;
       };
       const backtestText = (item) => {
         const bt = item.backtest_metrics || {};
@@ -3160,7 +3257,8 @@ END_TRADE_RECORD`;
         const target = item.exit_target || "--";
         const stop = item.stop || "--";
         const riskSize = item.risk?.display_size || item.size || "--";
-        return `${index + 1}. ${symbol} | ${asset} | ${status} | q ${score}${rawScore} | change ${change} | vol ${volume} | news ${news} | ${factorText(item)} | ${backtestText(item)} | entry ${entry} | target ${target} | stop ${stop} | size ${riskSize}`;
+        const execution = item.execution_quality || {};
+        return `${index + 1}. ${symbol} | ${asset} | ${status} | q ${score}${rawScore} | change ${change} | vol ${volume} | news ${news} | ${factorText(item)} | ${backtestText(item)} | spread ${execution.spread_percent ?? "--"}% | order ${execution.recommended_order_type || "--"} | entry ${entry} | target ${target} | stop ${stop} | size ${riskSize}`;
       }).join("\n");
       return `${engineName} ranked candidates:
 Scanned: ${data.scanned?.stocks || 0} stocks, ${data.scanned?.crypto || 0} crypto, watchlist ${(data.scanned?.watchlist || []).join(", ") || "--"}
@@ -3179,13 +3277,19 @@ Entry: ${selected.entry || "--"}
 Exit target: ${selected.exit_target || "--"}
 Stop: ${selected.stop || "--"}
 Size: ${selected.risk?.display_size || selected.size || "--"}
+Suggested order: ${selected.suggested_order_type || selected.execution_quality?.recommended_order_type || "--"} ${selected.limit_price ? `@ ${selected.limit_price}` : ""}
 Change: ${formatSignedPercent(selected.change_percent)}
 Volume ratio: ${selected.volume_ratio ? formatRatio(selected.volume_ratio) : "--"}
+Spread: ${selected.execution_quality?.spread_percent ?? "--"}% / max ${selected.execution_quality?.max_allowed_spread_percent ?? "--"}%
 News count: ${selected.news_count || 0}
+News sentiment: ${selected.news_sentiment || "neutral"} (${selected.news_sentiment_score ?? 0})
 Shortable: ${selected.shortable ? "yes" : "no"}
 Easy to borrow: ${selected.easy_to_borrow ? "yes" : "no"}
 Factor scores: ${factorText(selected)}
 Backtest: ${backtestText(selected)}
+Model confidence: ${selected.model_confidence?.label || "--"} (${selected.model_confidence?.score ?? "--"}/100)
+Portfolio: sector ${selected.portfolio?.sector || "--"}, sector exposure ${selected.portfolio?.sector_exposure_percent ?? "--"}%, corr ${selected.portfolio?.max_correlation ?? "--"}, open order ${selected.portfolio?.open_order ? "yes" : "no"}
+Risk penalty: ${selected.risk_penalty?.score ?? 0} ${selected.risk_penalty?.reasons?.length ? `(${selected.risk_penalty.reasons.join(", ")})` : ""}
 Reason: ${selected.reason || "--"}
 
 This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Trade Ticket or Execute Paper when you want agent reasoning or paper execution.`;
@@ -3216,6 +3320,12 @@ This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Tra
         apiStatus: existing?.apiStatus || "Not sent",
         reason: `Quant score ${candidate.quant_score ?? candidate.score ?? 0}. ${candidate.reason || ""}`,
         source: `Quant Scout cycle ${cycleNumber}. ${JSON.stringify(candidate)}`,
+        quantScore: candidate.quant_score ?? candidate.score ?? "",
+        suggestedOrderType: candidate.suggested_order_type || candidate.execution_quality?.recommended_order_type || "",
+        limitPrice: candidate.limit_price || candidate.execution_quality?.limit_price || "",
+        spreadPercent: candidate.execution_quality?.spread_percent ?? candidate.spread_percent ?? "",
+        maxAllowedSpreadPercent: candidate.execution_quality?.max_allowed_spread_percent ?? "",
+        modelConfidence: candidate.model_confidence || {},
         tradeDate: todayIsoDate(),
         createdAt: existing?.createdAt || now,
         updatedAt: now,
@@ -3256,6 +3366,7 @@ This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Tra
         const candidate = data.best || (data.candidates || [])[0];
         latestAgentResult = scoutSummary(data, candidate);
         addBubble(latestAgentResult, "tool");
+        renderQuantDashboard(data, candidate);
         if (candidate) {
           addScoutRecord(candidate, latestTradeCycle);
           addActivity(`Quant Scout picked ${candidate.symbol} (${candidate.quant_score ?? candidate.score}/100) without OpenAI.`, true);

@@ -218,6 +218,91 @@ ALPACA_EXECUTION_MARKETS: list[dict[str, str]] = [
 ]
 
 
+SECTOR_BY_SYMBOL: dict[str, str] = {
+    "AAPL": "Technology",
+    "MSFT": "Technology",
+    "NVDA": "Technology",
+    "AVGO": "Technology",
+    "GOOGL": "Communication Services",
+    "META": "Communication Services",
+    "TSLA": "Consumer Discretionary",
+    "AMZN": "Consumer Discretionary",
+    "XLE": "Energy",
+    "USO": "Energy",
+    "BNO": "Energy",
+    "FXE": "Currency Proxy",
+    "FXY": "Currency Proxy",
+    "UUP": "Currency Proxy",
+    "SPY": "Broad Market",
+    "QQQ": "Broad Market",
+    "DIA": "Broad Market",
+    "IWM": "Broad Market",
+}
+
+POSITIVE_NEWS_TERMS = {
+    "beat",
+    "beats",
+    "surge",
+    "surges",
+    "raise",
+    "raises",
+    "upgrade",
+    "upgraded",
+    "approval",
+    "approved",
+    "record",
+    "profit",
+    "growth",
+    "contract",
+    "partnership",
+    "guidance",
+}
+
+NEGATIVE_NEWS_TERMS = {
+    "miss",
+    "misses",
+    "drop",
+    "drops",
+    "downgrade",
+    "downgraded",
+    "lawsuit",
+    "probe",
+    "investigation",
+    "loss",
+    "cuts",
+    "cut",
+    "bankruptcy",
+    "offering",
+    "dilution",
+    "recall",
+}
+
+
+def sector_for_symbol(symbol: str, asset: dict[str, object] | None = None) -> str:
+    normalized = normalize_order_symbol(symbol)
+    if asset:
+        for key in ("sector", "industry", "class"):
+            value = str(asset.get(key) or "").strip()
+            if value and value.lower() not in {"us_equity", "crypto"}:
+                return value.title()
+    return SECTOR_BY_SYMBOL.get(normalized, "Unknown")
+
+
+def news_sentiment_delta(text: str) -> int:
+    normalized = text.lower()
+    positive = sum(1 for term in POSITIVE_NEWS_TERMS if term in normalized)
+    negative = sum(1 for term in NEGATIVE_NEWS_TERMS if term in normalized)
+    return positive - negative
+
+
+def daily_loss_from_account(account: dict[str, object]) -> float:
+    equity = to_float(account.get("equity") or account.get("portfolio_value"))
+    last_equity = to_float(account.get("last_equity"))
+    if equity is None or last_equity is None:
+        return 0
+    return max(0, last_equity - equity)
+
+
 def risk_settings_path() -> Path:
     configured = os.getenv("RISK_SETTINGS_PATH", "risk_settings.json")
     path = Path(configured)
@@ -848,6 +933,20 @@ def scout_candidate_payload(
     previous = to_float(snapshot_value(snapshot, "prevDailyBar", "c"))
     if not price:
         return None
+    bid = (
+        to_float(snapshot_value(snapshot, "latestQuote", "bp"))
+        or to_float(snapshot_value(snapshot, "latestQuote", "bid_price"))
+        or to_float(snapshot_value(snapshot, "latestQuote", "bidPrice"))
+    )
+    ask = (
+        to_float(snapshot_value(snapshot, "latestQuote", "ap"))
+        or to_float(snapshot_value(snapshot, "latestQuote", "ask_price"))
+        or to_float(snapshot_value(snapshot, "latestQuote", "askPrice"))
+    )
+    spread_percent = None
+    if bid and ask and ask >= bid:
+        midpoint = (ask + bid) / 2
+        spread_percent = (ask - bid) / midpoint * 100 if midpoint else None
     change = price - previous if previous else None
     change_percent = (change / previous * 100) if change is not None and previous else None
     direction, reason = trade_side_from_candidate(change_percent, asset, kind)
@@ -878,6 +977,9 @@ def scout_candidate_payload(
         "change_percent": change_percent,
         "volume": snapshot_value(snapshot, "dailyBar", "v"),
         "volume_ratio": volume_ratio,
+        "bid": bid,
+        "ask": ask,
+        "spread_percent": spread_percent,
         "news_count": news_count,
         "shortable": bool(asset.get("shortable", False)),
         "easy_to_borrow": bool(asset.get("easy_to_borrow", False)),
@@ -1142,6 +1244,13 @@ async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[s
     asset_class = infer_asset_class(symbol, candidate)
     direction = str(candidate.get("direction") or candidate.get("side") or "long").lower()
     staged_status = str(candidate.get("status") or "").lower()
+    spread_percent = to_float(candidate.get("spread_percent") or candidate.get("spreadPercent"))
+    max_allowed_spread = to_float(candidate.get("max_allowed_spread_percent") or candidate.get("maxAllowedSpreadPercent"))
+    if spread_percent is not None and max_allowed_spread is not None and spread_percent > max_allowed_spread:
+        return {
+            "status": "blocked",
+            "message": f"Spread {spread_percent:.2f}% is wider than the Quant Scout limit {max_allowed_spread:.2f}%; no paper order submitted.",
+        }
     if not symbol:
         return {"status": "blocked", "message": "No symbol was provided for the paper order."}
     if asset_class not in {"equity", "crypto"}:
@@ -1165,6 +1274,8 @@ async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[s
     max_position = to_float(risk_settings.get("max_position_usd")) or max_order
     requested_notional = parse_trade_number(candidate.get("size") or candidate.get("quantity_or_notional"))
     notional = min(value for value in [max_order, max_position, requested_notional or max_order] if value and value > 0)
+    suggested_order_type = str(candidate.get("order_type") or candidate.get("suggested_order_type") or candidate.get("suggestedOrderType") or "").lower()
+    limit_price = parse_trade_number(candidate.get("limit_price") or candidate.get("limitPrice"))
 
     base_url = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2").rstrip("/")
     async with httpx.AsyncClient(timeout=25, headers=headers) as client:
@@ -1189,6 +1300,11 @@ async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[s
         }
         if asset_class == "crypto":
             order_payload["time_in_force"] = "gtc"
+            if suggested_order_type == "limit" and limit_price and limit_price > 0:
+                order_payload["type"] = "limit"
+                order_payload["limit_price"] = f"{limit_price:.2f}"
+                order_payload.pop("notional", None)
+                order_payload["qty"] = f"{notional / limit_price:.8f}".rstrip("0").rstrip(".")
         else:
             asset_response = await client.get(f"{base_url}/assets/{symbol}")
             if asset_response.is_error:
@@ -1200,7 +1316,17 @@ async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[s
             if not asset.get("tradable"):
                 return {"status": "blocked", "message": f"{symbol} is not marked tradable by Alpaca."}
             order_payload["time_in_force"] = "day"
-            if not asset.get("fractionable"):
+            if suggested_order_type == "limit" and limit_price and limit_price > 0:
+                order_payload["type"] = "limit"
+                order_payload["limit_price"] = f"{limit_price:.4f}" if limit_price < 1 else f"{limit_price:.2f}"
+                qty = notional / limit_price
+                if not asset.get("fractionable"):
+                    qty = math.floor(qty)
+                if qty <= 0:
+                    return {"status": "blocked", "message": f"Risk limit ${notional:.2f} is too small for a limit order in {symbol}."}
+                order_payload.pop("notional", None)
+                order_payload["qty"] = str(qty if not asset.get("fractionable") else round(qty, 6)).rstrip("0").rstrip(".")
+            elif not asset.get("fractionable"):
                 entry_price = parse_trade_number(candidate.get("entry") or candidate.get("price"))
                 if not entry_price or entry_price <= 0:
                     return {"status": "blocked", "message": f"{symbol} is not fractionable; run Scout again so the ticket has a usable entry price."}
@@ -1477,13 +1603,20 @@ async def alpaca_scout(
     ]
 
     async with httpx.AsyncClient(timeout=25, headers=headers) as client:
-        screener, most_volume, most_trades, account_response, positions_response = await asyncio.gather(
+        screener, most_volume, most_trades, account_response, positions_response, open_orders_response = await asyncio.gather(
             fetch_screener_movers(client, data_base_url, max(top, 10), warnings),
             fetch_most_actives(client, data_base_url, "volume", max(top, 10), warnings),
             fetch_most_actives(client, data_base_url, "trades", max(top, 10), warnings),
             client.get(f"{trading_base_url}/account"),
             client.get(f"{trading_base_url}/positions"),
+            client.get(f"{trading_base_url}/orders", params={"status": "open", "limit": 100, "direction": "desc"}),
         )
+        positions_seed = positions_response.json() if not positions_response.is_error else []
+        held_symbols_seed = [
+            str(position.get("symbol", "")).upper()
+            for position in positions_seed
+            if isinstance(position, dict) and position.get("symbol")
+        ]
 
         mover_symbols = [
             str(item.get("symbol", "")).upper()
@@ -1495,7 +1628,7 @@ async def alpaca_scout(
             for item in [*most_volume.get("most_actives", []), *most_trades.get("most_actives", [])]
             if item.get("symbol")
         ]
-        stock_symbols = symbol_list(",".join([*stock_requested, *mover_symbols, *active_symbols]))[:80]
+        stock_symbols = symbol_list(",".join([*stock_requested, *held_symbols_seed, *mover_symbols, *active_symbols]))[:80]
         crypto_symbols = symbol_list(",".join([*crypto_requested, "BTC/USD", "ETH/USD", "SOL/USD"])) if include_crypto else []
 
         stocks_task = fetch_stock_snapshots(client, data_base_url, stock_symbols, warnings)
@@ -1527,24 +1660,47 @@ async def alpaca_scout(
 
     account = account_response.json() if not account_response.is_error else {}
     positions = positions_response.json() if not positions_response.is_error else []
+    open_orders = open_orders_response.json() if not open_orders_response.is_error else []
+    if open_orders_response.is_error:
+        warnings.append(f"Alpaca open-order check returned HTTP {open_orders_response.status_code}.")
+        open_orders = []
+    if not isinstance(open_orders, list):
+        open_orders = []
     held_symbols = {
         str(position.get("symbol", "")).upper(): position
         for position in positions
         if isinstance(position, dict) and position.get("symbol")
     }
+    open_order_symbols = {
+        normalize_order_symbol(order.get("symbol")): order
+        for order in open_orders
+        if isinstance(order, dict) and order.get("symbol") and is_active_alpaca_order(order)
+    }
     buying_power = to_float(account.get("buying_power")) or 0
     risk_settings = current_risk_settings()
     max_order = to_float(risk_settings.get("max_order_notional_usd")) or 50
+    max_daily_loss = to_float(risk_settings.get("max_daily_loss_usd")) or 250
+    daily_loss = daily_loss_from_account(account)
+    portfolio_value = to_float(account.get("portfolio_value") or account.get("equity")) or 0
+    sector_values: dict[str, float] = {}
+    for symbol, position in held_symbols.items():
+        sector = sector_for_symbol(symbol, {})
+        value = abs(to_float(position.get("market_value")) or 0)
+        sector_values[sector] = sector_values.get(sector, 0) + value
     paper_mode = env_bool("ALPACA_PAPER_TRADE", True)
 
     news_counts: dict[str, int] = {}
+    news_sentiment_scores: dict[str, int] = {}
     if news_response.is_error:
         warnings.append(f"Alpaca scout news returned HTTP {news_response.status_code}.")
     else:
         for item in news_response.json().get("news", []):
+            headline = " ".join(str(item.get(key) or "") for key in ("headline", "summary", "content"))
+            delta = news_sentiment_delta(headline)
             for symbol in item.get("symbols", []) or []:
                 ticker = str(symbol).upper()
                 news_counts[ticker] = news_counts.get(ticker, 0) + 1
+                news_sentiment_scores[ticker] = news_sentiment_scores.get(ticker, 0) + delta
 
     volume_by_symbol = {
         str(item.get("symbol", "")).upper(): item.get("volume")
@@ -1577,7 +1733,31 @@ async def alpaca_scout(
         if symbol in held_symbols:
             candidate["held_position"] = True
             candidate["reason"] = f"{candidate['reason']} Existing position detected."
+        sector = sector_for_symbol(symbol, assets.get(symbol))
+        sector_exposure = (sector_values.get(sector, 0) / portfolio_value * 100) if portfolio_value else 0
+        correlations = [
+            quant_engine.correlation_from_bars(bars.get(symbol, []), bars.get(held_symbol, []))
+            for held_symbol in held_symbols
+            if held_symbol != symbol and bars.get(held_symbol)
+        ]
+        correlations = [value for value in correlations if value is not None]
+        max_correlation = max(correlations, key=lambda value: abs(value)) if correlations else None
         candidate["backtest_metrics"] = quant_engine.backtest_from_bars(bars.get(symbol, []), candidate.get("direction"))
+        candidate["trend_metrics"] = quant_engine.trend_from_bars(bars.get(symbol, []), candidate.get("direction"))
+        sentiment_score = news_sentiment_scores.get(symbol, 0)
+        candidate["news_sentiment_score"] = sentiment_score
+        candidate["news_sentiment"] = "positive" if sentiment_score > 0 else "negative" if sentiment_score < 0 else "neutral"
+        candidate["portfolio"] = {
+            "held_position": symbol in held_symbols,
+            "open_order": symbol in open_order_symbols,
+            "open_order_status": str(open_order_symbols.get(symbol, {}).get("status") or ""),
+            "sector": sector,
+            "sector_exposure_percent": round(sector_exposure, 2),
+            "max_correlation": max_correlation,
+            "daily_loss_usd": round(daily_loss, 2),
+            "daily_loss_limit_usd": max_daily_loss,
+            "buying_power": buying_power,
+        }
         candidate["size"] = f"${min(max_order, buying_power):.2f} paper notional max"
         candidate_map[symbol] = candidate
 
@@ -1592,6 +1772,20 @@ async def alpaca_scout(
         )
         if not candidate:
             continue
+        candidate["news_sentiment_score"] = 0
+        candidate["news_sentiment"] = "neutral"
+        candidate["trend_metrics"] = {"status": "limited_history", "score": 5, "label": "crypto snapshot only"}
+        candidate["portfolio"] = {
+            "held_position": symbol in held_symbols,
+            "open_order": symbol in open_order_symbols,
+            "open_order_status": str(open_order_symbols.get(symbol, {}).get("status") or ""),
+            "sector": "Crypto",
+            "sector_exposure_percent": 0,
+            "max_correlation": None,
+            "daily_loss_usd": round(daily_loss, 2),
+            "daily_loss_limit_usd": max_daily_loss,
+            "buying_power": buying_power,
+        }
         candidate["size"] = f"${min(max_order, buying_power):.2f} paper notional max"
         candidate_map[symbol] = candidate
 
@@ -1629,7 +1823,7 @@ async def quant_scout(
     if raw.get("status") != "success":
         return {
             **raw,
-            "engine": "quant-v1",
+            "engine": "quant-v2",
             "raw_engine": raw.get("engine"),
             "quant": {
                 "enabled": True,
@@ -1647,16 +1841,26 @@ async def quant_scout(
     best = next((candidate for candidate in ranked if candidate.get("status") == "Staged ticket"), ranked[0] if ranked else None)
     return {
         **raw,
-        "engine": "quant-v1",
+        "engine": "quant-v2",
         "raw_engine": raw.get("engine"),
         "best": best,
         "candidates": ranked,
         "quant": {
             "enabled": True,
             "status": "success",
-            "version": "v1",
-            "description": "Factor score + risk sizing + liquidity + compact daily-bar backtest over the Alpaca-first universe.",
-            "factors": ["momentum", "volume", "news", "liquidity", "tradeability", "risk_quality", "backtest", "portfolio_penalty"],
+            "version": "v2",
+            "description": "Factor score + risk sizing + liquidity/spread execution quality + news sentiment + trend + portfolio-aware penalties over the Alpaca-first universe.",
+            "factors": [
+                "momentum",
+                "volume_surprise",
+                "volatility",
+                "liquidity",
+                "news_sentiment",
+                "trend",
+                "risk_quality",
+                "portfolio_penalty",
+                "execution_quality",
+            ],
             "stages_only_best": True,
         },
         "last_updated": datetime.now(timezone.utc).isoformat(),

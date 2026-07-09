@@ -305,6 +305,55 @@ class TradingRegressionTests(unittest.TestCase):
         self.assertEqual(result["request"]["notional"], "100.00")
         self.assertEqual(client.post_calls, [])
 
+    def test_paper_order_blocks_wide_quant_spread(self):
+        with fake_env():
+            result = async_run(
+                server.alpaca_paper_order(
+                    {
+                        "symbol": "VTAK",
+                        "asset_class": "equity",
+                        "status": "Staged ticket",
+                        "size": "$100",
+                        "spread_percent": 2.4,
+                        "max_allowed_spread_percent": 1.5,
+                    }
+                )
+            )
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("wider than the Quant Scout limit", result["message"])
+
+    def test_paper_order_dry_run_uses_quant_limit_order(self):
+        client = FakeAsyncClient(
+            get_routes=[
+                ("/account", FakeResponse({"buying_power": "5000"})),
+                ("/assets/VTAK", FakeResponse({"tradable": True, "fractionable": True})),
+                no_open_orders(),
+            ]
+        )
+        with fake_env(), patch.object(server.httpx, "AsyncClient", lambda *args, **kwargs: client), patch.object(
+            server, "current_risk_settings", return_value=risk(order="100", position="100")
+        ):
+            result = async_run(
+                server.alpaca_paper_order(
+                    {
+                        "symbol": "VTAK",
+                        "asset_class": "equity",
+                        "status": "Staged ticket",
+                        "size": "$100 quant risk cap",
+                        "suggested_order_type": "limit",
+                        "limit_price": "1.22",
+                        "spread_percent": 0.5,
+                        "max_allowed_spread_percent": 1.5,
+                        "dry_run": True,
+                    }
+                )
+            )
+        self.assertEqual(result["status"], "validated")
+        self.assertEqual(result["request"]["type"], "limit")
+        self.assertEqual(result["request"]["limit_price"], "1.22")
+        self.assertIn("qty", result["request"])
+        self.assertNotIn("notional", result["request"])
+
     def test_paper_order_blocks_duplicate_open_order_for_same_symbol(self):
         existing_order = {
             "id": "open-vtak",

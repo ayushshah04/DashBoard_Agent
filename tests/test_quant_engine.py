@@ -59,7 +59,27 @@ class QuantEngineTests(unittest.TestCase):
         self.assertEqual(ranked[0]["status"], "Staged ticket")
         self.assertEqual(ranked[0]["risk"]["suggested_notional"], 100)
         self.assertIn("quant risk cap", ranked[0]["size"])
+        self.assertIn("volume_surprise", ranked[0]["factor_scores"])
+        self.assertIn("risk_penalty", ranked[0])
         self.assertLess(ranked[1]["quant_score"], ranked[0]["quant_score"])
+
+    def test_execution_quality_prefers_limit_for_thin_or_wide_spread(self):
+        candidate = sample_candidate("THIN")
+        candidate.update({"price": 1.20, "entry": "$1.20", "volume": 75_000, "bid": 1.18, "ask": 1.22})
+        quality = quant_engine.execution_quality(candidate)
+        self.assertEqual(quality["recommended_order_type"], "limit")
+        self.assertFalse(quality["spread_ok"])
+        ranked = quant_engine.rank_candidates(
+            [candidate],
+            {
+                "max_order_notional_usd": "1000",
+                "max_position_usd": "100",
+                "max_daily_loss_usd": "500",
+            },
+            1000,
+            top=1,
+        )
+        self.assertEqual(ranked[0]["execution_route"], "watch_only")
 
     def test_quant_scout_endpoint_reranks_alpaca_universe(self):
         async def fake_alpaca_scout(symbols=None, top=8, include_crypto=True):
@@ -86,11 +106,12 @@ class QuantEngineTests(unittest.TestCase):
         with patch.object(server, "alpaca_scout", fake_alpaca_scout):
             result = async_run(server.quant_scout(symbols="GOOD,DROP", top=3, include_crypto=True))
 
-        self.assertEqual(result["engine"], "quant-v1")
+        self.assertEqual(result["engine"], "quant-v2")
         self.assertEqual(result["raw_engine"], "alpaca-first")
         self.assertEqual(result["best"]["symbol"], "GOOD")
         self.assertEqual(result["candidates"][0]["quant_rank"], 1)
         self.assertEqual(result["candidates"][0]["status"], "Staged ticket")
+        self.assertEqual(result["quant"]["version"], "v2")
 
 
 if __name__ == "__main__":
