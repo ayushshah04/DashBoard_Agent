@@ -1456,6 +1456,12 @@
       if (isFakeOrderId(normalized.orderId)) {
         normalized.orderId = "";
       }
+      const recoveredEntry = tradePlanValue(normalized, "entry");
+      const recoveredExitTarget = tradePlanValue(normalized, "exitTarget");
+      const recoveredStop = tradePlanValue(normalized, "stop");
+      if (recoveredEntry) normalized.entry = recoveredEntry;
+      if (recoveredExitTarget) normalized.exitTarget = recoveredExitTarget;
+      if (recoveredStop) normalized.stop = recoveredStop;
       if (!isSubmittedRecord(normalized) && /^ticket ready$/i.test(normalized.status || "")) {
         normalized.status = "Staged ticket";
         normalized.apiStatus = normalized.apiStatus || "Not sent";
@@ -1609,6 +1615,46 @@
       tradeActionStatus.textContent = `${hasResult ? "Last result ready" : "Waiting for research result"} | ${mode} | ${scout}`;
     }
 
+    function meaningfulTradeValue(value) {
+      const text = String(value ?? "").trim();
+      if (!text) return "";
+      return ["--", "n/a", "na", "none", "null", "undefined"].includes(text.toLowerCase()) ? "" : text;
+    }
+
+    function scoutSourceJson(record) {
+      const source = String(record?.source || "");
+      const start = source.indexOf("{");
+      if (start < 0) return null;
+      try {
+        return JSON.parse(source.slice(start));
+      } catch {
+        return null;
+      }
+    }
+
+    function tradePlanValue(record, field) {
+      const current = meaningfulTradeValue(record?.[field]);
+      if (current) return current;
+      const parsed = scoutSourceJson(record);
+      if (parsed) {
+        if (field === "exitTarget") return meaningfulTradeValue(parsed.exit_target || parsed.exitTarget);
+        if (field === "entry") return meaningfulTradeValue(parsed.entry);
+        if (field === "stop") return meaningfulTradeValue(parsed.stop);
+      }
+      const source = String(record?.source || record?.reason || "");
+      if (!source) return "";
+      if (field === "exitTarget") {
+        return meaningfulTradeValue(fieldFromText(source, ["exit_target", "exit target", "target", "profit target", "take profit"]));
+      }
+      if (field === "entry") {
+        return meaningfulTradeValue(fieldFromText(source, ["entry", "entry price", "limit price", "filled price", "average fill price"]));
+      }
+      if (field === "stop") {
+        return meaningfulTradeValue(fieldFromText(source, ["stop", "stop loss", "stop/invalidation", "invalidation"]));
+      }
+      return "";
+    }
+
     function mergeAlpacaTradeRecord(remote) {
       const orderId = remote.order_id || remote.orderId || "";
       const symbol = remote.symbol || "--";
@@ -1617,15 +1663,21 @@
       if (!record) {
         record = tradeRecords.find((item) => item.symbol === symbol && isStagedRecord(item) && !item.orderId);
       }
+      const remoteEntry = meaningfulTradeValue(remote.entry);
+      const remoteExitTarget = meaningfulTradeValue(remote.exit_target || remote.exitTarget);
+      const remoteStop = meaningfulTradeValue(remote.stop);
+      const existingEntry = tradePlanValue(record, "entry");
+      const existingExitTarget = tradePlanValue(record, "exitTarget");
+      const existingStop = tradePlanValue(record, "stop");
       const update = {
         status: remote.status || "Alpaca order",
         outcome: remote.outcome || "open",
         symbol,
         assetClass: remote.asset_class || remote.assetClass || "",
         direction: remote.direction || "--",
-        entry: remote.entry || "market",
-        exitTarget: remote.exit_target || remote.exitTarget || "--",
-        stop: remote.stop || "--",
+        entry: remoteEntry || existingEntry || "market",
+        exitTarget: remoteExitTarget || existingExitTarget || "--",
+        stop: remoteStop || existingStop || "--",
         size: remote.quantity_or_notional || remote.size || "--",
         orderId,
         apiStatus: remote.api_status || remote.apiStatus || "synced",
@@ -1728,12 +1780,15 @@
       tradeRecords.forEach((record) => {
         const row = document.createElement("div");
         row.className = `trade-row ${tradeRecordClass(record.status)}`;
+        const entry = tradePlanValue(record, "entry") || "--";
+        const exitTarget = tradePlanValue(record, "exitTarget") || "--";
+        const stop = tradePlanValue(record, "stop") || "--";
         [
           record.symbol || "--",
           record.status || "--",
-          record.entry || "--",
-          record.exitTarget || "--",
-          record.stop || "--",
+          entry,
+          exitTarget,
+          stop,
           record.size || "--",
           record.updatedAt || record.createdAt || "--",
           recordApiText(record),
@@ -3044,15 +3099,18 @@ END_TRADE_RECORD`;
     }
 
     function paperPayloadFromRecord(record) {
+      const entry = tradePlanValue(record, "entry") || record.entry;
+      const exitTarget = tradePlanValue(record, "exitTarget") || record.exitTarget;
+      const stop = tradePlanValue(record, "stop") || record.stop;
       return {
         symbol: record.symbol,
         asset_class: record.assetClass || record.asset_class || (record.symbol && record.symbol.includes("/") ? "crypto" : "equity"),
         direction: record.direction || "long",
         status: record.status || "Staged ticket",
-        entry: record.entry,
-        exitTarget: record.exitTarget,
-        exit_target: record.exitTarget,
-        stop: record.stop,
+        entry,
+        exitTarget,
+        exit_target: exitTarget,
+        stop,
         size: record.size,
         quantity_or_notional: record.size,
         suggested_order_type: record.suggestedOrderType,
@@ -3066,15 +3124,22 @@ END_TRADE_RECORD`;
 
     function applyTradeRecordUpdate(record, update) {
       const now = new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+      const updateEntry = meaningfulTradeValue(update.entry);
+      const updateExitTarget = meaningfulTradeValue(update.exitTarget || update.exit_target);
+      const updateStop = meaningfulTradeValue(update.stop);
+      const updateSize = meaningfulTradeValue(update.size || update.quantity_or_notional);
+      const existingEntry = tradePlanValue(record, "entry");
+      const existingExitTarget = tradePlanValue(record, "exitTarget");
+      const existingStop = tradePlanValue(record, "stop");
       Object.assign(record, {
         status: update.status || record.status,
         outcome: update.outcome || record.outcome || "open",
         symbol: update.symbol || record.symbol,
         direction: update.direction || record.direction,
-        entry: update.entry || record.entry,
-        exitTarget: update.exitTarget || update.exit_target || record.exitTarget,
-        stop: update.stop || record.stop,
-        size: update.size || update.quantity_or_notional || record.size,
+        entry: updateEntry || existingEntry || record.entry,
+        exitTarget: updateExitTarget || existingExitTarget || record.exitTarget,
+        stop: updateStop || existingStop || record.stop,
+        size: updateSize || record.size,
         orderId: update.orderId || update.order_id || record.orderId || "",
         apiStatus: update.apiStatus || update.api_status || record.apiStatus || "Not sent",
         reason: update.reason || record.reason,
@@ -3216,6 +3281,7 @@ END_TRADE_RECORD`;
       }).join("\n");
       return `${engineName} ranked candidates:
 Scanned: ${data.scanned?.stocks || 0} stocks, ${data.scanned?.crypto || 0} crypto, watchlist ${(data.scanned?.watchlist || []).join(", ") || "--"}
+Universe: ${data.scanned?.universe_note || "Alpaca candidate universe"} Pool top ${data.scanned?.stock_pool_top || "--"} | caps ${data.scanned?.max_stock_universe || "--"} stocks / ${data.scanned?.max_crypto_universe || "--"} crypto
 Scout-selected ticker: ${selected.symbol || "--"} | ${selected.status || "Watch"} (${selected.quant_score ?? selected.score ?? "--"}/100)
 
 ${ranked || "No ranked candidates returned."}

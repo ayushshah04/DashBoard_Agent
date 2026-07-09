@@ -50,6 +50,18 @@ def env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def env_int(name: str, default: int, minimum: int | None = None, maximum: int | None = None) -> int:
+    try:
+        value = int(str(os.getenv(name, str(default))).strip())
+    except (TypeError, ValueError):
+        value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
 def split_env_urls(value: str) -> list[str]:
     normalized = value.replace("\n", ",").replace(";", ",")
     return [item.strip() for item in normalized.split(",") if item.strip()]
@@ -124,7 +136,7 @@ def infer_asset_class(symbol: str, candidate: dict[str, object]) -> str:
         return "option"
     if "/" in symbol:
         base = symbol.split("/", 1)[0]
-        if base in {"BTC", "ETH", "SOL", "DOGE"}:
+        if base in {"BTC", "ETH", "SOL", "DOGE", "LTC", "BCH", "LINK", "AVAX", "UNI", "AAVE"}:
             return "crypto"
         return "currency"
     return "equity"
@@ -554,7 +566,16 @@ CRYPTO_SYMBOL_ALIASES = {
     "ETH": "ETH/USD",
     "SOL": "SOL/USD",
     "DOGE": "DOGE/USD",
+    "LTC": "LTC/USD",
+    "BCH": "BCH/USD",
+    "LINK": "LINK/USD",
+    "AVAX": "AVAX/USD",
+    "UNI": "UNI/USD",
+    "AAVE": "AAVE/USD",
 }
+
+
+DEFAULT_SCOUT_CRYPTO_SYMBOLS = "BTC/USD,ETH/USD,SOL/USD,DOGE/USD,LTC/USD,BCH/USD,LINK/USD,AVAX/USD"
 
 
 def unique_market_symbols(kind: str) -> list[str]:
@@ -1578,7 +1599,7 @@ async def markets_movers(top: int = Query(default=5, ge=3, le=10)) -> dict[str, 
 @app.get("/api/alpaca/scout")
 async def alpaca_scout(
     symbols: str | None = Query(default=None),
-    top: int = Query(default=8, ge=3, le=20),
+    top: int = Query(default=8, ge=3, le=50),
     include_crypto: bool = Query(default=True),
 ) -> dict[str, object]:
     headers = alpaca_headers()
@@ -1594,6 +1615,9 @@ async def alpaca_scout(
     data_base_url = os.getenv("ALPACA_DATA_BASE_URL", "https://data.alpaca.markets").rstrip("/")
     trading_base_url = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2").rstrip("/")
     warnings: list[str] = []
+    stock_pool_top = env_int("SCOUT_POOL_SIZE", 40, minimum=max(top, 10), maximum=50)
+    max_stock_universe = env_int("SCOUT_MAX_STOCKS", 200, minimum=max(top, 20), maximum=500)
+    max_crypto_universe = env_int("SCOUT_MAX_CRYPTO", 20, minimum=3, maximum=100)
     requested = symbol_list(symbols, os.getenv("WATCHLIST_SYMBOLS", "TSLA,NVDA,SPY"))
     crypto_requested = [CRYPTO_SYMBOL_ALIASES.get(symbol, symbol) for symbol in requested if CRYPTO_SYMBOL_ALIASES.get(symbol) or "/" in symbol]
     stock_requested = [
@@ -1604,13 +1628,32 @@ async def alpaca_scout(
 
     async with httpx.AsyncClient(timeout=25, headers=headers) as client:
         screener, most_volume, most_trades, account_response, positions_response, open_orders_response = await asyncio.gather(
-            fetch_screener_movers(client, data_base_url, max(top, 10), warnings),
-            fetch_most_actives(client, data_base_url, "volume", max(top, 10), warnings),
-            fetch_most_actives(client, data_base_url, "trades", max(top, 10), warnings),
+            fetch_screener_movers(client, data_base_url, stock_pool_top, warnings),
+            fetch_most_actives(client, data_base_url, "volume", stock_pool_top, warnings),
+            fetch_most_actives(client, data_base_url, "trades", stock_pool_top, warnings),
             client.get(f"{trading_base_url}/account"),
             client.get(f"{trading_base_url}/positions"),
             client.get(f"{trading_base_url}/orders", params={"status": "open", "limit": 100, "direction": "desc"}),
         )
+        crypto_asset_symbols: list[str] = []
+        if include_crypto:
+            try:
+                crypto_assets_response = await client.get(
+                    f"{trading_base_url}/assets",
+                    params={"asset_class": "crypto", "status": "active"},
+                )
+                if crypto_assets_response.is_error:
+                    warnings.append(f"Alpaca crypto asset list returned HTTP {crypto_assets_response.status_code}; using configured crypto seed list.")
+                else:
+                    crypto_assets = crypto_assets_response.json()
+                    if isinstance(crypto_assets, list):
+                        crypto_asset_symbols = [
+                            normalize_order_symbol(asset.get("symbol"))
+                            for asset in crypto_assets
+                            if isinstance(asset, dict) and asset.get("symbol")
+                        ]
+            except httpx.HTTPError as exc:
+                warnings.append(f"Alpaca crypto asset list unavailable ({type(exc).__name__}); using configured crypto seed list.")
         positions_seed = positions_response.json() if not positions_response.is_error else []
         held_symbols_seed = [
             str(position.get("symbol", "")).upper()
@@ -1628,8 +1671,9 @@ async def alpaca_scout(
             for item in [*most_volume.get("most_actives", []), *most_trades.get("most_actives", [])]
             if item.get("symbol")
         ]
-        stock_symbols = symbol_list(",".join([*stock_requested, *held_symbols_seed, *mover_symbols, *active_symbols]))[:80]
-        crypto_symbols = symbol_list(",".join([*crypto_requested, "BTC/USD", "ETH/USD", "SOL/USD"])) if include_crypto else []
+        stock_symbols = symbol_list(",".join([*stock_requested, *held_symbols_seed, *mover_symbols, *active_symbols]))[:max_stock_universe]
+        crypto_seed = symbol_list(os.getenv("SCOUT_CRYPTO_SYMBOLS"), DEFAULT_SCOUT_CRYPTO_SYMBOLS)
+        crypto_symbols = symbol_list(",".join([*crypto_requested, *crypto_asset_symbols, *crypto_seed]))[:max_crypto_universe] if include_crypto else []
 
         stocks_task = fetch_stock_snapshots(client, data_base_url, stock_symbols, warnings)
         assets_task = fetch_assets_details(client, trading_base_url, stock_symbols)
@@ -1804,6 +1848,10 @@ async def alpaca_scout(
             "stocks": len(stock_symbols),
             "crypto": len(crypto_symbols),
             "watchlist": requested,
+            "stock_pool_top": stock_pool_top,
+            "max_stock_universe": max_stock_universe,
+            "max_crypto_universe": max_crypto_universe,
+            "universe_note": "Candidate universe from Alpaca movers, most-active lists, held positions, watchlist, and configured/supported crypto pairs.",
         },
         "best": best,
         "candidates": candidates,
@@ -1815,10 +1863,10 @@ async def alpaca_scout(
 @app.get("/api/quant/scout")
 async def quant_scout(
     symbols: str | None = Query(default=None),
-    top: int = Query(default=8, ge=3, le=20),
+    top: int = Query(default=8, ge=3, le=50),
     include_crypto: bool = Query(default=True),
 ) -> dict[str, object]:
-    raw_top = min(20, max(top, 12))
+    raw_top = env_int("SCOUT_POOL_SIZE", 40, minimum=max(top, 12), maximum=50)
     raw = await alpaca_scout(symbols=symbols, top=raw_top, include_crypto=include_crypto)
     if raw.get("status") != "success":
         return {

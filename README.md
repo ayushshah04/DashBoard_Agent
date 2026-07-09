@@ -89,6 +89,10 @@ MAX_ORDER_NOTIONAL_USD=50
 MARKET_UNIVERSE=equities,crypto,fx-proxies,oil-proxies
 ACCOUNT_CURRENCY=USD
 WATCHLIST_SYMBOLS=TSLA,NVDA,SPY
+SCOUT_POOL_SIZE=40
+SCOUT_MAX_STOCKS=200
+SCOUT_MAX_CRYPTO=20
+SCOUT_CRYPTO_SYMBOLS=BTC/USD,ETH/USD,SOL/USD,DOGE/USD,LTC/USD,BCH/USD,LINK/USD,AVAX/USD
 RESEARCH_VAULT_DB=research_vault.db
 LONG_TERM_HORIZON=3-5 years
 OPTIONS_MAX_CONTRACTS=1
@@ -111,6 +115,10 @@ The dashboard adds portfolio metrics under the funds row: tracked trades, win ra
 Use `Clear Chat` beside the `Run` button to clear the command feed without scrolling. The Calendar tab groups saved trade records by day and shows each day's total trades, wins, losses, skipped records, blocked records, and symbols.
 
 The Scout engine calls Alpaca directly for movers, snapshots, assets, account exposure, and news counts. It writes the best candidate to the Trade Board without calling OpenAI. `Start Scout` is the paper execution path: when Quant Scout marks a setup trade-ready, the dashboard submits it to Alpaca paper trading through the guarded paper-order API. If Scout marks the setup as `Watch`, `Skipped`, blocked by spread, or otherwise not trade-ready, no order is submitted. Use `Trade Ticket` when you want the ChatGPT agent to do deeper reasoning before Scout execution.
+
+The Scout `Scanned` count is the candidate universe, not every listed security in Alpaca. By default the backend asks Alpaca for roughly 40 gainers, 40 losers, 40 most-active-by-volume, and 40 most-active-by-trades, then dedupes that with your watchlist and held positions. `SCOUT_POOL_SIZE` controls each screener pull, `SCOUT_MAX_STOCKS` caps the deduped stock universe, and `SCOUT_MAX_CRYPTO` caps supported/configured crypto pairs. Increase these when you want a wider search, but expect slower API calls.
+
+Alpaca order rows do not store the dashboard's Scout target/stop plan unless you submit a bracket/OCO order. The Trade Board preserves the Scout exit target and stop in browser storage when syncing plain Alpaca orders, so fills no longer replace planned targets with `--`.
 
 ## Alpaca market support
 

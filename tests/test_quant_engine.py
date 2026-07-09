@@ -82,7 +82,12 @@ class QuantEngineTests(unittest.TestCase):
         self.assertEqual(ranked[0]["execution_route"], "watch_only")
 
     def test_quant_scout_endpoint_reranks_alpaca_universe(self):
+        requested = {}
+
         async def fake_alpaca_scout(symbols=None, top=8, include_crypto=True):
+            requested["top"] = top
+            requested["symbols"] = symbols
+            requested["include_crypto"] = include_crypto
             return {
                 "configured": True,
                 "status": "success",
@@ -103,9 +108,12 @@ class QuantEngineTests(unittest.TestCase):
                 "warnings": [],
             }
 
-        with patch.object(server, "alpaca_scout", fake_alpaca_scout):
+        with patch.dict("os.environ", {"SCOUT_POOL_SIZE": "40"}, clear=False), patch.object(server, "alpaca_scout", fake_alpaca_scout):
             result = async_run(server.quant_scout(symbols="GOOD,DROP", top=3, include_crypto=True))
 
+        self.assertEqual(requested["top"], 40)
+        self.assertEqual(requested["symbols"], "GOOD,DROP")
+        self.assertTrue(requested["include_crypto"])
         self.assertEqual(result["engine"], "quant-v2")
         self.assertEqual(result["raw_engine"], "alpaca-first")
         self.assertEqual(result["best"]["symbol"], "GOOD")
