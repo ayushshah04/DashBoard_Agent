@@ -15,6 +15,7 @@ from fastapi import Body, FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+import quant_engine
 from agent import OpenAIMCPAgent, DEFAULT_MODEL
 from research_vault import add_note, delete_note, search_notes, summarize_ticker
 from website_scan import scan_company_website
@@ -991,9 +992,9 @@ async def trading_prompts() -> dict[str, str]:
             f"status, symbol, asset_class, direction, entry, exit_target, stop, quantity_or_notional, order_id, and reason."
         ),
         "continuous_paper_scout": (
-            f"Use /api/alpaca/scout as the primary Scout engine across {markets}. It is Alpaca-first, does not call "
-            f"OpenAI, and returns ranked candidates using movers, snapshots, assets, account exposure, news counts, "
-            f"and risk limits. Only use the agent after a user asks for deeper reasoning, a trade ticket, or paper execution."
+            f"Use /api/quant/scout as the primary Scout engine across {markets}. It is Alpaca-first, does not call "
+            f"OpenAI, and reranks candidates with factor scores, liquidity, compact backtest metrics, account exposure, "
+            f"news counts, and risk sizing. Only use the agent after a user asks for deeper reasoning, a trade ticket, or paper execution."
         ),
         "live_guarded": (
             f"If and only if live trading is unlocked by the backend, screen {markets}, check news and account risk, "
@@ -1576,6 +1577,7 @@ async def alpaca_scout(
         if symbol in held_symbols:
             candidate["held_position"] = True
             candidate["reason"] = f"{candidate['reason']} Existing position detected."
+        candidate["backtest_metrics"] = quant_engine.backtest_from_bars(bars.get(symbol, []), candidate.get("direction"))
         candidate["size"] = f"${min(max_order, buying_power):.2f} paper notional max"
         candidate_map[symbol] = candidate
 
@@ -1612,6 +1614,51 @@ async def alpaca_scout(
         "best": best,
         "candidates": candidates,
         "warnings": warnings,
+        "last_updated": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/quant/scout")
+async def quant_scout(
+    symbols: str | None = Query(default=None),
+    top: int = Query(default=8, ge=3, le=20),
+    include_crypto: bool = Query(default=True),
+) -> dict[str, object]:
+    raw_top = min(20, max(top, 12))
+    raw = await alpaca_scout(symbols=symbols, top=raw_top, include_crypto=include_crypto)
+    if raw.get("status") != "success":
+        return {
+            **raw,
+            "engine": "quant-v1",
+            "raw_engine": raw.get("engine"),
+            "quant": {
+                "enabled": True,
+                "status": "raw_scout_unavailable",
+                "description": "Quant Scout needs the Alpaca-first candidate universe before it can rerank.",
+            },
+        }
+
+    ranked = quant_engine.rank_candidates(
+        raw.get("candidates", []),
+        raw.get("risk", {}),
+        raw.get("buying_power"),
+        top=top,
+    )
+    best = next((candidate for candidate in ranked if candidate.get("status") == "Staged ticket"), ranked[0] if ranked else None)
+    return {
+        **raw,
+        "engine": "quant-v1",
+        "raw_engine": raw.get("engine"),
+        "best": best,
+        "candidates": ranked,
+        "quant": {
+            "enabled": True,
+            "status": "success",
+            "version": "v1",
+            "description": "Factor score + risk sizing + liquidity + compact daily-bar backtest over the Alpaca-first universe.",
+            "factors": ["momentum", "volume", "news", "liquidity", "tradeability", "risk_quality", "backtest", "portfolio_penalty"],
+            "stages_only_best": True,
+        },
         "last_updated": datetime.now(timezone.utc).isoformat(),
     }
 

@@ -3135,23 +3135,36 @@ END_TRADE_RECORD`;
       if (!candidate && !candidates.length) {
         return `Alpaca Scout found no risk-ready candidates. Scanned ${data.scanned?.stocks || 0} stocks and ${data.scanned?.crypto || 0} crypto symbols.`;
       }
+      const engineName = data.engine === "quant-v1" ? "Quant Scout" : "Alpaca-first Scout";
       const selected = candidate || candidates[0];
+      const factorText = (item) => {
+        const factors = item.factor_scores || {};
+        if (!Object.keys(factors).length) return "factors --";
+        return `factors M${factors.momentum ?? "--"} V${factors.volume ?? "--"} L${factors.liquidity ?? "--"} R${factors.risk_quality ?? "--"}`;
+      };
+      const backtestText = (item) => {
+        const bt = item.backtest_metrics || {};
+        if (bt.status !== "ok") return `bt ${bt.status || "n/a"}`;
+        return `bt win ${bt.win_rate_percent ?? "--"}% sharpe ${bt.sharpe_proxy ?? "--"} dd ${bt.max_drawdown_percent ?? "--"}%`;
+      };
       const ranked = candidates.map((item, index) => {
         const symbol = item.symbol || "--";
         const asset = item.asset_class || "--";
         const status = item.status || "Watch";
-        const score = item.score ?? "--";
+        const score = item.quant_score ?? item.score ?? "--";
+        const rawScore = item.alpaca_score && item.alpaca_score !== score ? ` raw ${item.alpaca_score}` : "";
         const change = formatSignedPercent(item.change_percent);
         const volume = item.volume_ratio ? formatRatio(item.volume_ratio) : "--";
         const news = item.news_count || 0;
         const entry = item.entry || "--";
         const target = item.exit_target || "--";
         const stop = item.stop || "--";
-        return `${index + 1}. ${symbol} | ${asset} | ${status} | score ${score} | change ${change} | vol ${volume} | news ${news} | entry ${entry} | target ${target} | stop ${stop}`;
+        const riskSize = item.risk?.display_size || item.size || "--";
+        return `${index + 1}. ${symbol} | ${asset} | ${status} | q ${score}${rawScore} | change ${change} | vol ${volume} | news ${news} | ${factorText(item)} | ${backtestText(item)} | entry ${entry} | target ${target} | stop ${stop} | size ${riskSize}`;
       }).join("\n");
-      return `Alpaca-first Scout ranked candidates:
+      return `${engineName} ranked candidates:
 Scanned: ${data.scanned?.stocks || 0} stocks, ${data.scanned?.crypto || 0} crypto, watchlist ${(data.scanned?.watchlist || []).join(", ") || "--"}
-Staged best ticker: ${selected.symbol || "--"} (${selected.score ?? "--"}/100)
+Staged best ticker: ${selected.symbol || "--"} (${selected.quant_score ?? selected.score ?? "--"}/100)
 
 ${ranked || "No ranked candidates returned."}
 
@@ -3159,20 +3172,23 @@ Selected ticket detail:
 Symbol: ${selected.symbol || "--"}
 Asset class: ${selected.asset_class || "--"}
 Direction: ${selected.direction || "--"}
-Score: ${selected.score ?? "--"}
+Quant score: ${selected.quant_score ?? selected.score ?? "--"}
+Raw Alpaca score: ${selected.alpaca_score ?? "--"}
 Status: ${selected.status || "--"}
 Entry: ${selected.entry || "--"}
 Exit target: ${selected.exit_target || "--"}
 Stop: ${selected.stop || "--"}
-Size: ${selected.size || "--"}
+Size: ${selected.risk?.display_size || selected.size || "--"}
 Change: ${formatSignedPercent(selected.change_percent)}
 Volume ratio: ${selected.volume_ratio ? formatRatio(selected.volume_ratio) : "--"}
 News count: ${selected.news_count || 0}
 Shortable: ${selected.shortable ? "yes" : "no"}
 Easy to borrow: ${selected.easy_to_borrow ? "yes" : "no"}
+Factor scores: ${factorText(selected)}
+Backtest: ${backtestText(selected)}
 Reason: ${selected.reason || "--"}
 
-This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticket or Execute Paper when you want agent reasoning or paper execution.`;
+This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Trade Ticket or Execute Paper when you want agent reasoning or paper execution.`;
     }
 
     function addScoutRecord(candidate, cycleNumber) {
@@ -3180,14 +3196,14 @@ This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticke
       const symbol = candidate.symbol || "--";
       const status = candidate.status === "Ticket ready" ? "Staged ticket" : (candidate.status || "Watch");
       const existing = tradeRecords.find((record) => (
-        record.kind === "Alpaca Scout"
+        record.kind === "Quant Scout"
         && record.symbol === symbol
         && isStagedRecord(record)
         && normalizeRecordDate(record) === todayIsoDate()
       ));
       const record = {
         id: existing?.id || Date.now(),
-        kind: "Alpaca Scout",
+        kind: "Quant Scout",
         status,
         outcome: candidate.outcome || "open",
         symbol,
@@ -3198,8 +3214,8 @@ This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticke
         size: candidate.size || "--",
         orderId: existing?.orderId || "",
         apiStatus: existing?.apiStatus || "Not sent",
-        reason: `Score ${candidate.score || 0}. ${candidate.reason || ""}`,
-        source: `Alpaca Scout cycle ${cycleNumber}. ${JSON.stringify(candidate)}`,
+        reason: `Quant score ${candidate.quant_score ?? candidate.score ?? 0}. ${candidate.reason || ""}`,
+        source: `Quant Scout cycle ${cycleNumber}. ${JSON.stringify(candidate)}`,
         tradeDate: todayIsoDate(),
         createdAt: existing?.createdAt || now,
         updatedAt: now,
@@ -3231,7 +3247,7 @@ This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticke
           include_crypto: "true",
           symbols: watchedTickers.join(","),
         });
-        const data = await fetch(`/api/alpaca/scout?${params.toString()}`).then((res) => res.json());
+        const data = await fetch(`/api/quant/scout?${params.toString()}`).then((res) => res.json());
         if (!data.configured || data.status !== "success") {
           addActivity(data.message || "Alpaca Scout unavailable.");
           addBubble(data.message || "Alpaca Scout unavailable.", "tool");
@@ -3242,15 +3258,15 @@ This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticke
         addBubble(latestAgentResult, "tool");
         if (candidate) {
           addScoutRecord(candidate, latestTradeCycle);
-          addActivity(`Alpaca Scout picked ${candidate.symbol} (${candidate.score}/100) without OpenAI.`, true);
+          addActivity(`Quant Scout picked ${candidate.symbol} (${candidate.quant_score ?? candidate.score}/100) without OpenAI.`, true);
         } else {
-          addActivity("Alpaca Scout found no risk-ready candidates.");
+          addActivity("Quant Scout found no risk-ready candidates.");
         }
         (data.warnings || []).forEach((warning) => addActivity(warning));
         return true;
       } catch (error) {
-        addActivity(`Alpaca Scout failed: ${error.message}`);
-        addBubble(`Alpaca Scout failed: ${error.message}`, "tool");
+        addActivity(`Quant Scout failed: ${error.message}`);
+        addBubble(`Quant Scout failed: ${error.message}`, "tool");
         return false;
       } finally {
         scoutBusy = false;
@@ -3262,7 +3278,7 @@ This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticke
       if (continuousScoutTimer) {
         clearInterval(continuousScoutTimer);
         continuousScoutTimer = null;
-        addActivity("Alpaca-first Scout stopped.");
+        addActivity("Quant Scout stopped.");
         updateTradeActionState();
         return;
       }
@@ -3272,7 +3288,7 @@ This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticke
         return;
       }
       continuousScoutTimer = setInterval(runContinuousScoutCycle, continuousScoutIntervalMs);
-      addActivity("Alpaca-first Scout started. No OpenAI credits used for scout cycles.", true);
+      addActivity("Quant Scout started. No OpenAI credits used for scout cycles.", true);
       updateTradeActionState();
     }
 
