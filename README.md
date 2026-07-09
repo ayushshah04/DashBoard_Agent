@@ -110,7 +110,7 @@ The dashboard adds portfolio metrics under the funds row: tracked trades, win ra
 
 Use `Clear Chat` beside the `Run` button to clear the command feed without scrolling. The Calendar tab groups saved trade records by day and shows each day's total trades, wins, losses, skipped records, blocked records, and symbols.
 
-The Scout engine calls Alpaca directly for movers, snapshots, assets, account exposure, and news counts. It writes the best candidate to the Trade Board without calling OpenAI. `Execute Paper` now uses the latest staged Scout/ticket row and submits it directly to Alpaca paper trading, so paper execution does not depend on OpenAI quota. Use `Trade Ticket` when you want the ChatGPT agent to do deeper reasoning before execution.
+The Scout engine calls Alpaca directly for movers, snapshots, assets, account exposure, and news counts. It writes the best candidate to the Trade Board without calling OpenAI. `Start Scout` is the paper execution path: when Quant Scout marks a setup trade-ready, the dashboard submits it to Alpaca paper trading through the guarded paper-order API. If Scout marks the setup as `Watch`, `Skipped`, blocked by spread, or otherwise not trade-ready, no order is submitted. Use `Trade Ticket` when you want the ChatGPT agent to do deeper reasoning before Scout execution.
 
 ## Alpaca market support
 

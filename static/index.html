@@ -1073,7 +1073,6 @@
         </div>
         <div class="trade-action-buttons">
           <button id="buildTradeTicket" type="button">Trade Ticket</button>
-          <button id="executePaperTrade" type="button">Execute Paper</button>
           <button id="continuousScout" type="button">Start Scout</button>
         </div>
       </div>
@@ -1268,7 +1267,6 @@
     const saveRiskSettingsButton = document.querySelector("#saveRiskSettings");
     const tradeActionStatus = document.querySelector("#tradeActionStatus");
     const buildTradeTicket = document.querySelector("#buildTradeTicket");
-    const executePaperTrade = document.querySelector("#executePaperTrade");
     const continuousScout = document.querySelector("#continuousScout");
     const tradeBoardStatus = document.querySelector("#tradeBoardStatus");
     const tradeBoardRows = document.querySelector("#tradeBoardRows");
@@ -1569,7 +1567,7 @@
       if (!tradeRecords.length) {
         const empty = document.createElement("div");
         empty.className = "calendar-row";
-        empty.innerHTML = "<strong>No trade history yet</strong><small>Trade Ticket, Execute Paper, and Scout records will appear here by day.</small>";
+        empty.innerHTML = "<strong>No trade history yet</strong><small>Trade Ticket and Scout records will appear here by day.</small>";
         calendarDays.appendChild(empty);
         return;
       }
@@ -1599,16 +1597,15 @@
     function updateTradeActionState() {
       const hasResult = Boolean(latestAgentResult);
       buildTradeTicket.disabled = agentBusy;
-      executePaperTrade.disabled = agentBusy || directPaperBusy;
-      continuousScout.disabled = scoutBusy;
+      continuousScout.disabled = scoutBusy || directPaperBusy;
       continuousScout.textContent = scoutBusy ? "Scout Running" : (continuousScoutTimer ? "Stop Scout" : "Start Scout");
       continuousScout.classList.toggle("scout-on", Boolean(continuousScoutTimer));
       const mode = Object.keys(tradingConfigCache).length
         ? (tradingConfigCache.paper ? "paper" : (tradingConfigCache.live_trading_enabled ? "live unlocked" : "live locked"))
         : "mode loading";
       const scout = continuousScoutTimer
-        ? `Quant Scout on | every ${Math.round(continuousScoutIntervalMs / 60000)}m`
-        : "Quant Scout off";
+        ? `Quant Scout auto-paper on | every ${Math.round(continuousScoutIntervalMs / 60000)}m`
+        : "Quant Scout auto-paper off";
       tradeActionStatus.textContent = `${hasResult ? "Last result ready" : "Waiting for research result"} | ${mode} | ${scout}`;
     }
 
@@ -2983,39 +2980,6 @@ Latest research/search result:
 ${latestResultBlock()}`;
     }
 
-    function executePaperTradePrompt() {
-      return `This button click is my explicit instruction to execute a paper trade if the backend exposes paper order tools.
-
-Use the latest research/search result below as the candidate context. Check Alpaca account funds, current quote/snapshot, market movers, Alpaca news, Newsdata.io sentiment, and existing exposure before acting.
-
-Rules:
-- Paper trading only unless the backend is already explicitly live-unlocked.
-- If live mode is active, do not auto-execute; return the exact trade ticket instead.
-- If order tools are locked or missing, do not execute; return the trade ticket and explain what is missing.
-- Place at most one small paper order only if the setup is liquid, risk-compliant, and high confidence.
-- Respect ${riskText()}.
-- Avoid options orders unless explicitly unlocked and the strategy has defined max loss.
-- If conditions are weak, skip the trade.
-
-End your answer with this exact block so the dashboard can update the Trade Board:
-TRADE_RECORD
-status: Executed paper, Skipped, or Blocked
-outcome: open, win, loss, skipped, or blocked
-symbol:
-asset_class:
-direction:
-entry:
-exit_target:
-stop:
-quantity_or_notional:
-order_id:
-reason:
-END_TRADE_RECORD
-
-Latest research/search result:
-${latestResultBlock()}`;
-    }
-
     function continuousScoutPrompt() {
       latestTradeCycle += 1;
       return `Continuous Trade Scout cycle ${latestTradeCycle}.
@@ -3121,7 +3085,6 @@ END_TRADE_RECORD`;
 
     async function executePaperOrderDirect(record) {
       directPaperBusy = true;
-      executePaperTrade.disabled = true;
       updateTradeActionState();
       try {
         const response = await fetch("/api/alpaca/paper-order", {
@@ -3163,31 +3126,6 @@ END_TRADE_RECORD`;
         directPaperBusy = false;
         updateTradeActionState();
       }
-    }
-
-    async function requestPaperExecution() {
-      if (scoutBusy || directPaperBusy) {
-        addActivity("Execute Paper skipped: Scout or paper execution is already running.");
-        return;
-      }
-      addActivity("Execute Paper is running Quant Scout first, then following Scout's paper decision.", true);
-      const decision = await runContinuousScoutCycle({ source: "execute-paper" });
-      const candidate = decision?.candidate;
-      const record = decision?.record;
-      if (!candidate || !record) {
-        addBubble("Scout did not return a paper execution candidate.", "tool");
-        return;
-      }
-      if (!scoutReadyForPaperExecution(candidate, record)) {
-        const status = candidate.status || record.status || "Watch";
-        const reasons = candidate.risk_penalty?.reasons?.length
-          ? candidate.risk_penalty.reasons.join(", ")
-          : candidate.reason || "Scout did not mark this setup trade-ready.";
-        addActivity(`Scout chose ${candidate.symbol || record.symbol} as ${status}; no paper order submitted.`);
-        addBubble(`Scout decision: ${candidate.symbol || record.symbol} is ${status}. Execute Paper did not submit because Scout did not mark it trade-ready.\nReason: ${reasons}`, "tool");
-        return;
-      }
-      await executePaperOrderDirect(record);
     }
 
     function renderQuantDashboard(data, candidate) {
@@ -3308,7 +3246,7 @@ Portfolio: sector ${selected.portfolio?.sector || "--"}, sector exposure ${selec
 Risk penalty: ${selected.risk_penalty?.score ?? 0} ${selected.risk_penalty?.reasons?.length ? `(${selected.risk_penalty.reasons.join(", ")})` : ""}
 Reason: ${selected.reason || "--"}
 
-This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Trade Ticket or Execute Paper when you want agent reasoning or paper execution.`;
+This ${engineName} result used Alpaca APIs only and did not call OpenAI. Start Scout auto-submits paper orders only when Scout marks the setup trade-ready; use Trade Ticket when you want agent reasoning.`;
     }
 
     function addScoutRecord(candidate, cycleNumber) {
@@ -3361,7 +3299,7 @@ This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Tra
       return record;
     }
 
-    async function runContinuousScoutCycle(options = {}) {
+    async function runContinuousScoutCycle() {
       if (scoutBusy) {
         addActivity("Alpaca Scout cycle skipped: previous cycle still running.");
         return null;
@@ -3388,8 +3326,12 @@ This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Tra
         let record = null;
         if (candidate) {
           record = addScoutRecord(candidate, latestTradeCycle);
-          const action = options.source === "execute-paper" ? "paper decision" : "pick";
-          addActivity(`Quant Scout ${action}: ${candidate.symbol} (${candidate.quant_score ?? candidate.score}/100, ${candidate.status || "Watch"}) without OpenAI.`, true);
+          addActivity(`Quant Scout pick: ${candidate.symbol} (${candidate.quant_score ?? candidate.score}/100, ${candidate.status || "Watch"}) without OpenAI.`, true);
+          if (scoutReadyForPaperExecution(candidate, record)) {
+            addActivity(`Scout found a trade-ready paper setup for ${candidate.symbol}; submitting through Alpaca paper API.`, true);
+            addBubble(`Scout decision: ${candidate.symbol} is trade-ready. Submitting paper order through Alpaca paper API with dashboard risk controls.`, "tool");
+            await executePaperOrderDirect(record);
+          }
         } else {
           addActivity("Quant Scout found no risk-ready candidates.");
         }
@@ -3501,7 +3443,6 @@ This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Tra
       });
     });
     buildTradeTicket.addEventListener("click", requestTradeTicket);
-    executePaperTrade.addEventListener("click", requestPaperExecution);
     continuousScout.addEventListener("click", toggleContinuousScout);
     syncAlpacaOrders.addEventListener("click", () => loadAlpacaOrders());
     clearStagedTrades.addEventListener("click", clearStagedTradeRows);

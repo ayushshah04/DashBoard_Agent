@@ -126,8 +126,7 @@ Tool calls and tool results stream back to the UI.
 The Trade Action Center sits under the market/risk cockpit. It captures the latest agent research or deterministic Scout result and exposes three direct actions:
 
 - `Trade Ticket`: turn the latest result into an execution-ready trade ticket without placing an order.
-- `Execute Paper`: submit the latest staged ticket directly to Alpaca paper trading after account, asset, direction, and risk checks pass.
-- `Start Scout` / `Stop Scout`: run an Alpaca-first deterministic scout every five minutes without spending OpenAI credits.
+- `Start Scout` / `Stop Scout`: run an Alpaca-first deterministic scout every five minutes without spending OpenAI credits, and auto-submit paper orders only when Scout marks a setup trade-ready.
 
 The Portfolio Metrics strip records tracked trades, win rate, win/loss count, reward/risk ratio, and exposure ratio under the funds cards. The Trade Board records recent tickets and execution requests below those metrics. It shows symbol, status, entry, exit/target, stop, size, last update time, and Alpaca API/order status in a scrollable table. Staged Scout rows are de-duplicated by symbol/status/entry/day so repeated cycles update the existing row instead of filling the board.
 
@@ -135,7 +134,7 @@ The `Clear Chat` button stays beside the command `Run` button so the user can re
 
 The Risk Management strip lets the user adjust order notional, max position size, daily loss limit, and options contract count without editing `.env`. Saved dashboard overrides update the visible Risk line and are included in future trade-ticket and paper-execution prompts.
 
-The Scout engine uses Alpaca movers, snapshots, assets, account exposure, and news counts to rank candidates. It writes the best candidate to the Trade Board and never executes live trades. The user can then choose `Trade Ticket` for AI research or `Execute Paper` for direct Alpaca paper-order submission.
+The Scout engine uses Alpaca movers, snapshots, assets, account exposure, and news counts to rank candidates. It writes the best candidate to the Trade Board and never executes live trades. When Scout returns a trade-ready paper setup, `Start Scout` submits it through the guarded Alpaca paper-order API; when Scout returns `Watch`, `Skipped`, or blocked candidates, no order is submitted. The user can still choose `Trade Ticket` for AI research before using Scout.
 
 ### 7.5.2 Alpaca Execution Coverage
 
