@@ -3131,25 +3131,46 @@ END_TRADE_RECORD`;
     }
 
     function scoutSummary(data, candidate) {
-      if (!candidate) {
+      const candidates = Array.isArray(data.candidates) ? data.candidates.slice(0, 8) : [];
+      if (!candidate && !candidates.length) {
         return `Alpaca Scout found no risk-ready candidates. Scanned ${data.scanned?.stocks || 0} stocks and ${data.scanned?.crypto || 0} crypto symbols.`;
       }
-      return `Alpaca-first Scout candidate:
-Symbol: ${candidate.symbol}
-Asset class: ${candidate.asset_class}
-Direction: ${candidate.direction}
-Score: ${candidate.score}
-Status: ${candidate.status}
-Entry: ${candidate.entry}
-Exit target: ${candidate.exit_target}
-Stop: ${candidate.stop}
-Size: ${candidate.size}
-Change: ${formatSignedPercent(candidate.change_percent)}
-Volume ratio: ${candidate.volume_ratio ? formatRatio(candidate.volume_ratio) : "--"}
-News count: ${candidate.news_count || 0}
-Shortable: ${candidate.shortable ? "yes" : "no"}
-Easy to borrow: ${candidate.easy_to_borrow ? "yes" : "no"}
-Reason: ${candidate.reason}
+      const selected = candidate || candidates[0];
+      const ranked = candidates.map((item, index) => {
+        const symbol = item.symbol || "--";
+        const asset = item.asset_class || "--";
+        const status = item.status || "Watch";
+        const score = item.score ?? "--";
+        const change = formatSignedPercent(item.change_percent);
+        const volume = item.volume_ratio ? formatRatio(item.volume_ratio) : "--";
+        const news = item.news_count || 0;
+        const entry = item.entry || "--";
+        const target = item.exit_target || "--";
+        const stop = item.stop || "--";
+        return `${index + 1}. ${symbol} | ${asset} | ${status} | score ${score} | change ${change} | vol ${volume} | news ${news} | entry ${entry} | target ${target} | stop ${stop}`;
+      }).join("\n");
+      return `Alpaca-first Scout ranked candidates:
+Scanned: ${data.scanned?.stocks || 0} stocks, ${data.scanned?.crypto || 0} crypto, watchlist ${(data.scanned?.watchlist || []).join(", ") || "--"}
+Staged best ticker: ${selected.symbol || "--"} (${selected.score ?? "--"}/100)
+
+${ranked || "No ranked candidates returned."}
+
+Selected ticket detail:
+Symbol: ${selected.symbol || "--"}
+Asset class: ${selected.asset_class || "--"}
+Direction: ${selected.direction || "--"}
+Score: ${selected.score ?? "--"}
+Status: ${selected.status || "--"}
+Entry: ${selected.entry || "--"}
+Exit target: ${selected.exit_target || "--"}
+Stop: ${selected.stop || "--"}
+Size: ${selected.size || "--"}
+Change: ${formatSignedPercent(selected.change_percent)}
+Volume ratio: ${selected.volume_ratio ? formatRatio(selected.volume_ratio) : "--"}
+News count: ${selected.news_count || 0}
+Shortable: ${selected.shortable ? "yes" : "no"}
+Easy to borrow: ${selected.easy_to_borrow ? "yes" : "no"}
+Reason: ${selected.reason || "--"}
 
 This Scout result used Alpaca APIs only and did not call OpenAI. Use Trade Ticket or Execute Paper when you want agent reasoning or paper execution.`;
     }
