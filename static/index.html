@@ -3073,6 +3073,12 @@ END_TRADE_RECORD`;
         || (latestScoutCandidate ? tradeRecords.find((record) => record.id === latestScoutCandidate.dashboardRecordId) : null);
     }
 
+    function scoutReadyForPaperExecution(candidate, record) {
+      const status = `${candidate?.status || record?.status || ""}`.toLowerCase();
+      const route = `${candidate?.execution_route || record?.executionRoute || ""}`.toLowerCase();
+      return route === "alpaca_order_api" || status.includes("staged") || status.includes("ticket ready");
+    }
+
     function paperPayloadFromRecord(record) {
       return {
         symbol: record.symbol,
@@ -3160,15 +3166,25 @@ END_TRADE_RECORD`;
     }
 
     async function requestPaperExecution() {
-      let record = latestExecutableRecord();
-      if (!record) {
-        addActivity("No staged ticket found. Running one Alpaca Scout cycle first.", true);
-        const started = await runContinuousScoutCycle();
-        if (!started) return;
-        record = latestExecutableRecord();
+      if (scoutBusy || directPaperBusy) {
+        addActivity("Execute Paper skipped: Scout or paper execution is already running.");
+        return;
       }
-      if (!record) {
-        addBubble("No executable staged ticket is available. Run Scout or Trade Ticket first.", "tool");
+      addActivity("Execute Paper is running Quant Scout first, then following Scout's paper decision.", true);
+      const decision = await runContinuousScoutCycle({ source: "execute-paper" });
+      const candidate = decision?.candidate;
+      const record = decision?.record;
+      if (!candidate || !record) {
+        addBubble("Scout did not return a paper execution candidate.", "tool");
+        return;
+      }
+      if (!scoutReadyForPaperExecution(candidate, record)) {
+        const status = candidate.status || record.status || "Watch";
+        const reasons = candidate.risk_penalty?.reasons?.length
+          ? candidate.risk_penalty.reasons.join(", ")
+          : candidate.reason || "Scout did not mark this setup trade-ready.";
+        addActivity(`Scout chose ${candidate.symbol || record.symbol} as ${status}; no paper order submitted.`);
+        addBubble(`Scout decision: ${candidate.symbol || record.symbol} is ${status}. Execute Paper did not submit because Scout did not mark it trade-ready.\nReason: ${reasons}`, "tool");
         return;
       }
       await executePaperOrderDirect(record);
@@ -3262,7 +3278,7 @@ END_TRADE_RECORD`;
       }).join("\n");
       return `${engineName} ranked candidates:
 Scanned: ${data.scanned?.stocks || 0} stocks, ${data.scanned?.crypto || 0} crypto, watchlist ${(data.scanned?.watchlist || []).join(", ") || "--"}
-Staged best ticker: ${selected.symbol || "--"} (${selected.quant_score ?? selected.score ?? "--"}/100)
+Scout-selected ticker: ${selected.symbol || "--"} | ${selected.status || "Watch"} (${selected.quant_score ?? selected.score ?? "--"}/100)
 
 ${ranked || "No ranked candidates returned."}
 
@@ -3321,6 +3337,7 @@ This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Tra
         reason: `Quant score ${candidate.quant_score ?? candidate.score ?? 0}. ${candidate.reason || ""}`,
         source: `Quant Scout cycle ${cycleNumber}. ${JSON.stringify(candidate)}`,
         quantScore: candidate.quant_score ?? candidate.score ?? "",
+        executionRoute: candidate.execution_route || "",
         suggestedOrderType: candidate.suggested_order_type || candidate.execution_quality?.recommended_order_type || "",
         limitPrice: candidate.limit_price || candidate.execution_quality?.limit_price || "",
         spreadPercent: candidate.execution_quality?.spread_percent ?? candidate.spread_percent ?? "",
@@ -3341,12 +3358,13 @@ This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Tra
       latestScoutCandidate = { ...candidate, status, dashboardRecordId: record.id };
       saveTradeRecords();
       renderTradeBoard();
+      return record;
     }
 
-    async function runContinuousScoutCycle() {
+    async function runContinuousScoutCycle(options = {}) {
       if (scoutBusy) {
         addActivity("Alpaca Scout cycle skipped: previous cycle still running.");
-        return false;
+        return null;
       }
       latestTradeCycle += 1;
       scoutBusy = true;
@@ -3361,24 +3379,26 @@ This ${engineName} result used Alpaca APIs only and did not call OpenAI. Use Tra
         if (!data.configured || data.status !== "success") {
           addActivity(data.message || "Alpaca Scout unavailable.");
           addBubble(data.message || "Alpaca Scout unavailable.", "tool");
-          return false;
+          return null;
         }
         const candidate = data.best || (data.candidates || [])[0];
         latestAgentResult = scoutSummary(data, candidate);
         addBubble(latestAgentResult, "tool");
         renderQuantDashboard(data, candidate);
+        let record = null;
         if (candidate) {
-          addScoutRecord(candidate, latestTradeCycle);
-          addActivity(`Quant Scout picked ${candidate.symbol} (${candidate.quant_score ?? candidate.score}/100) without OpenAI.`, true);
+          record = addScoutRecord(candidate, latestTradeCycle);
+          const action = options.source === "execute-paper" ? "paper decision" : "pick";
+          addActivity(`Quant Scout ${action}: ${candidate.symbol} (${candidate.quant_score ?? candidate.score}/100, ${candidate.status || "Watch"}) without OpenAI.`, true);
         } else {
           addActivity("Quant Scout found no risk-ready candidates.");
         }
         (data.warnings || []).forEach((warning) => addActivity(warning));
-        return true;
+        return { data, candidate, record };
       } catch (error) {
         addActivity(`Quant Scout failed: ${error.message}`);
         addBubble(`Quant Scout failed: ${error.message}`, "tool");
-        return false;
+        return null;
       } finally {
         scoutBusy = false;
         updateTradeActionState();
