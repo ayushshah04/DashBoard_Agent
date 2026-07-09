@@ -122,6 +122,47 @@ def parse_trade_number(value: object) -> float | None:
         return None
 
 
+def format_order_price(price: float) -> str:
+    return f"{price:.4f}" if price < 1 else f"{price:.2f}"
+
+
+def protective_exit_payload(candidate: dict[str, object], entry_reference: float | None) -> dict[str, object]:
+    target = parse_trade_number(
+        candidate.get("exitTarget")
+        or candidate.get("exit_target")
+        or candidate.get("take_profit")
+        or candidate.get("target")
+    )
+    stop = parse_trade_number(
+        candidate.get("stop")
+        or candidate.get("stopLoss")
+        or candidate.get("stop_loss")
+    )
+    if target is None and stop is None:
+        return {"status": "missing", "message": "No exit target or stop was provided."}
+    if target is None or stop is None:
+        return {"status": "invalid", "message": "Automatic bracket exits require both an exit target and a stop."}
+    if entry_reference is None or entry_reference <= 0:
+        return {"status": "invalid", "message": "Automatic bracket exits require a usable entry or limit price."}
+    if target <= entry_reference:
+        return {"status": "invalid", "message": f"Exit target ${target:.4f} must be above entry ${entry_reference:.4f} for long bracket orders."}
+    if stop >= entry_reference:
+        return {"status": "invalid", "message": f"Stop ${stop:.4f} must be below entry ${entry_reference:.4f} for long bracket orders."}
+    if entry_reference - stop < 0.01:
+        return {
+            "status": "invalid",
+            "message": "Alpaca bracket stop-loss prices must be at least $0.01 below the entry/base price for long orders.",
+        }
+    return {
+        "status": "ready",
+        "order_class": "bracket",
+        "take_profit": {"limit_price": format_order_price(target)},
+        "stop_loss": {"stop_price": format_order_price(stop)},
+        "target": format_order_price(target),
+        "stop": format_order_price(stop),
+    }
+
+
 def normalize_order_symbol(symbol: object) -> str:
     return re.sub(r"[^A-Za-z0-9./-]", "", str(symbol or "").upper())[:24]
 
@@ -617,6 +658,19 @@ def alpaca_order_trade_record(order: dict[str, object], reason: str = "Synced fr
     filled_qty = order.get("filled_qty")
     limit_price = order.get("limit_price")
     stop_price = order.get("stop_price")
+    take_profit = order.get("take_profit") if isinstance(order.get("take_profit"), dict) else {}
+    stop_loss = order.get("stop_loss") if isinstance(order.get("stop_loss"), dict) else {}
+    legs = order.get("legs") if isinstance(order.get("legs"), list) else []
+    target_price = take_profit.get("limit_price")
+    stop_price = stop_price or stop_loss.get("stop_price")
+    for leg in legs:
+        if not isinstance(leg, dict):
+            continue
+        leg_type = str(leg.get("type") or "").lower()
+        if target_price in {None, ""} and leg_type == "limit":
+            target_price = leg.get("limit_price")
+        if stop_price in {None, ""} and "stop" in leg_type:
+            stop_price = leg.get("stop_price")
     notional = order.get("notional")
     qty = order.get("qty")
     order_id = str(order.get("id") or "")
@@ -646,11 +700,12 @@ def alpaca_order_trade_record(order: dict[str, object], reason: str = "Synced fr
         "asset_class": asset_class,
         "direction": "long" if side == "buy" else side or "--",
         "entry": f"${filled_price}" if filled_price not in {None, ""} else (f"limit ${limit_price}" if limit_price not in {None, ""} else "market"),
-        "exit_target": "--",
+        "exit_target": f"${target_price}" if target_price not in {None, ""} else "--",
         "stop": f"${stop_price}" if stop_price not in {None, ""} else "--",
         "quantity_or_notional": " / ".join(size_parts) or "--",
         "order_id": order_id,
         "api_status": api_status,
+        "order_class": str(order.get("order_class") or ""),
         "submitted_at": submitted,
         "updated_at": updated,
         "filled_at": filled_at,
@@ -1297,6 +1352,8 @@ async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[s
     notional = min(value for value in [max_order, max_position, requested_notional or max_order] if value and value > 0)
     suggested_order_type = str(candidate.get("order_type") or candidate.get("suggested_order_type") or candidate.get("suggestedOrderType") or "").lower()
     limit_price = parse_trade_number(candidate.get("limit_price") or candidate.get("limitPrice"))
+    auto_bracket_exits = env_bool("AUTO_BRACKET_EXITS", True)
+    protective_plan: dict[str, object] = {"status": "disabled" if not auto_bracket_exits else "missing"}
 
     base_url = os.getenv("ALPACA_BASE_URL", "https://paper-api.alpaca.markets/v2").rstrip("/")
     async with httpx.AsyncClient(timeout=25, headers=headers) as client:
@@ -1357,6 +1414,44 @@ async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[s
                 order_payload.pop("notional", None)
                 order_payload["qty"] = str(qty)
 
+            if auto_bracket_exits:
+                entry_reference = limit_price or parse_trade_number(candidate.get("entry") or candidate.get("price"))
+                protective_plan = protective_exit_payload(candidate, entry_reference)
+                if protective_plan["status"] == "invalid":
+                    return {
+                        "status": "blocked",
+                        "message": f"{protective_plan['message']} No unprotected equity paper order submitted.",
+                        "protective_exits": protective_plan,
+                    }
+                if protective_plan["status"] == "ready":
+                    if not entry_reference or entry_reference <= 0:
+                        return {"status": "blocked", "message": "Bracket exits need a usable entry price. No paper order submitted."}
+                    bracket_qty = math.floor(notional / entry_reference)
+                    if bracket_qty < 1:
+                        return {
+                            "status": "blocked",
+                            "message": (
+                                f"Bracket exits require at least one whole share. Risk limit ${notional:.2f} is too small "
+                                f"for {symbol} near ${entry_reference:.2f}; no unprotected paper order submitted."
+                            ),
+                            "protective_exits": protective_plan,
+                        }
+                    order_payload.pop("notional", None)
+                    order_payload["qty"] = str(bracket_qty)
+                    order_payload["order_class"] = "bracket"
+                    order_payload["take_profit"] = protective_plan["take_profit"]
+                    order_payload["stop_loss"] = protective_plan["stop_loss"]
+        if asset_class == "crypto" and auto_bracket_exits:
+            candidate_has_exits = any(
+                candidate.get(key) not in {None, "", "--"}
+                for key in ("exitTarget", "exit_target", "take_profit", "target", "stop", "stopLoss", "stop_loss")
+            )
+            if candidate_has_exits:
+                protective_plan = {
+                    "status": "unsupported",
+                    "message": "Alpaca crypto orders support simple order classes only; bracket exits were not attached.",
+                }
+
         open_orders_response = await client.get(
             f"{base_url}/orders",
             params={"status": "open", "limit": 100, "direction": "desc"},
@@ -1393,11 +1488,16 @@ async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[s
         if candidate.get("dry_run") or candidate.get("validate_only"):
             return {
                 "status": "validated",
-                "message": f"Paper order validation passed for {symbol}; no order submitted.",
+                "message": (
+                    f"Paper bracket order validation passed for {symbol}; no order submitted."
+                    if order_payload.get("order_class") == "bracket"
+                    else f"Paper order validation passed for {symbol}; no order submitted."
+                ),
                 "request": {key: value for key, value in order_payload.items() if key != "client_order_id"},
                 "asset_class": asset_class,
                 "risk": risk_settings,
                 "buying_power": buying_power,
+                "protective_exits": protective_plan,
                 "supported_markets": ALPACA_EXECUTION_MARKETS,
             }
 
@@ -1420,11 +1520,24 @@ async def alpaca_paper_order(candidate: dict[str, object] = Body(...)) -> dict[s
         or trade_record.get("quantity_or_notional")
         or f"${notional:.2f} notional"
     )
+    bracket_attached = order_payload.get("order_class") == "bracket"
+    if bracket_attached:
+        trade_record["status"] = "Bracket submitted"
+        trade_record["order_class"] = "bracket"
+        trade_record["reason"] = (
+            f"{trade_record.get('reason') or ''}; Protective bracket exits submitted "
+            f"target ${protective_plan.get('target')} stop ${protective_plan.get('stop')}."
+        ).strip("; ")
     return {
         "status": "submitted",
-        "message": f"Paper order submitted to Alpaca for {symbol}.",
+        "message": (
+            f"Paper bracket order submitted to Alpaca for {symbol} with take-profit and stop-loss exits."
+            if bracket_attached
+            else f"Paper order submitted to Alpaca for {symbol}."
+        ),
         "order": order,
         "trade_record": trade_record,
+        "protective_exits": protective_plan,
         "supported_markets": ALPACA_EXECUTION_MARKETS,
     }
 

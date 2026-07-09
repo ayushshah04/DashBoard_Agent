@@ -86,6 +86,7 @@ LIVE_TRADING_CONFIRMATION=I_UNDERSTAND_LIVE_TRADING_RISK
 MAX_POSITION_USD=100
 MAX_DAILY_LOSS_USD=250
 MAX_ORDER_NOTIONAL_USD=50
+AUTO_BRACKET_EXITS=true
 MARKET_UNIVERSE=equities,crypto,fx-proxies,oil-proxies
 ACCOUNT_CURRENCY=USD
 WATCHLIST_SYMBOLS=TSLA,NVDA,SPY
@@ -118,7 +119,11 @@ The Scout engine calls Alpaca directly for movers, snapshots, assets, account ex
 
 The Scout `Scanned` count is the candidate universe, not every listed security in Alpaca. By default the backend asks Alpaca for roughly 40 gainers, 40 losers, 40 most-active-by-volume, and 40 most-active-by-trades, then dedupes that with your watchlist and held positions. `SCOUT_POOL_SIZE` controls each screener pull, `SCOUT_MAX_STOCKS` caps the deduped stock universe, and `SCOUT_MAX_CRYPTO` caps supported/configured crypto pairs. Increase these when you want a wider search, but expect slower API calls.
 
-Alpaca order rows do not store the dashboard's Scout target/stop plan unless you submit a bracket/OCO order. The Trade Board preserves the Scout exit target and stop in browser storage when syncing plain Alpaca orders, so fills no longer replace planned targets with `--`.
+When `AUTO_BRACKET_EXITS=true`, equity paper orders that include a valid `exit_target` and `stop` are submitted to Alpaca as native bracket orders with `take_profit.limit_price` and `stop_loss.stop_price`. This makes Alpaca manage the target/stop legs after the entry fills. The backend blocks invalid brackets, including stops less than `$0.01` below the long entry/base price. Bracket orders are sent as whole-share quantity orders; if the risk cap is too small to buy one whole share, the backend blocks the order instead of sending an unprotected entry.
+
+Crypto orders remain simple orders because Alpaca's Trading API supports only the simple order class for crypto. The dashboard still displays crypto targets/stops for planning, but native automatic crypto exits require a separate monitor/OCO-style engine.
+
+Alpaca order rows do not always return the dashboard's Scout target/stop plan for plain non-bracket orders. The Trade Board preserves the Scout exit target and stop in browser storage when syncing plain Alpaca orders, so fills no longer replace planned targets with `--`.
 
 ## Alpaca market support
 

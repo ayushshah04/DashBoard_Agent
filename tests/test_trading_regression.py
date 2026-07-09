@@ -354,6 +354,70 @@ class TradingRegressionTests(unittest.TestCase):
         self.assertIn("qty", result["request"])
         self.assertNotIn("notional", result["request"])
 
+    def test_paper_order_dry_run_adds_equity_bracket_exits(self):
+        client = FakeAsyncClient(
+            get_routes=[
+                ("/account", FakeResponse({"buying_power": "5000"})),
+                ("/assets/VTAK", FakeResponse({"tradable": True, "fractionable": True})),
+                no_open_orders(),
+            ]
+        )
+        with fake_env(), patch.object(server.httpx, "AsyncClient", lambda *args, **kwargs: client), patch.object(
+            server, "current_risk_settings", return_value=risk(order="100", position="100")
+        ):
+            result = async_run(
+                server.alpaca_paper_order(
+                    {
+                        "symbol": "VTAK",
+                        "asset_class": "equity",
+                        "status": "Staged ticket",
+                        "size": "$100 quant risk cap",
+                        "suggested_order_type": "limit",
+                        "limit_price": "1.22",
+                        "entry": "$1.22",
+                        "exit_target": "$1.25",
+                        "stop": "$1.20",
+                        "dry_run": True,
+                    }
+                )
+            )
+        self.assertEqual(result["status"], "validated")
+        self.assertEqual(result["request"]["order_class"], "bracket")
+        self.assertEqual(result["request"]["take_profit"], {"limit_price": "1.25"})
+        self.assertEqual(result["request"]["stop_loss"], {"stop_price": "1.20"})
+        self.assertEqual(result["request"]["qty"], "81")
+        self.assertNotIn("notional", result["request"])
+        self.assertEqual(result["protective_exits"]["status"], "ready")
+
+    def test_paper_order_blocks_invalid_equity_bracket_stop(self):
+        client = FakeAsyncClient(
+            get_routes=[
+                ("/account", FakeResponse({"buying_power": "5000"})),
+                ("/assets/PENNY", FakeResponse({"tradable": True, "fractionable": True})),
+            ]
+        )
+        with fake_env(), patch.object(server.httpx, "AsyncClient", lambda *args, **kwargs: client), patch.object(
+            server, "current_risk_settings", return_value=risk(order="100", position="100")
+        ):
+            result = async_run(
+                server.alpaca_paper_order(
+                    {
+                        "symbol": "PENNY",
+                        "asset_class": "equity",
+                        "status": "Staged ticket",
+                        "size": "$100 quant risk cap",
+                        "suggested_order_type": "limit",
+                        "limit_price": "0.1200",
+                        "entry": "$0.1200",
+                        "exit_target": "$0.1300",
+                        "stop": "$0.1190",
+                    }
+                )
+            )
+        self.assertEqual(result["status"], "blocked")
+        self.assertIn("at least $0.01 below", result["message"])
+        self.assertEqual(client.post_calls, [])
+
     def test_paper_order_blocks_duplicate_open_order_for_same_symbol(self):
         existing_order = {
             "id": "open-vtak",
@@ -457,6 +521,7 @@ class TradingRegressionTests(unittest.TestCase):
         self.assertEqual(result["status"], "validated")
         self.assertEqual(result["asset_class"], "crypto")
         self.assertEqual(result["request"]["time_in_force"], "gtc")
+        self.assertNotIn("order_class", result["request"])
         self.assertEqual(client.post_calls, [])
 
     def test_paper_order_returns_rejection_without_client_order_id(self):

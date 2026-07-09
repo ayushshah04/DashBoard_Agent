@@ -1443,7 +1443,8 @@
       const orderId = String(record.orderId || "").trim();
       if (!isFakeOrderId(orderId)) {
         const api = record.apiStatus && record.apiStatus !== "synced" ? ` | ${record.apiStatus}` : "";
-        return `Alpaca ${orderId.slice(0, 8)}${api}`;
+        const orderClass = /bracket/i.test(record.orderClass || "") ? " | bracket" : "";
+        return `Alpaca ${orderId.slice(0, 8)}${api}${orderClass}`;
       }
       if (/alpaca reason/i.test(record.apiStatus || "")) return "Not sent";
       if (record.apiStatus) return record.apiStatus;
@@ -1681,6 +1682,7 @@
         size: remote.quantity_or_notional || remote.size || "--",
         orderId,
         apiStatus: remote.api_status || remote.apiStatus || "synced",
+        orderClass: remote.order_class || remote.orderClass || "",
         reason: remote.reason || "Synced from Alpaca orders.",
         submittedAt: remote.submitted_at || remote.submittedAt || "",
         filledAt: remote.filled_at || remote.filledAt || "",
@@ -3142,6 +3144,7 @@ END_TRADE_RECORD`;
         size: updateSize || record.size,
         orderId: update.orderId || update.order_id || record.orderId || "",
         apiStatus: update.apiStatus || update.api_status || record.apiStatus || "Not sent",
+        orderClass: update.orderClass || update.order_class || record.orderClass || "",
         reason: update.reason || record.reason,
         tradeDate: record.tradeDate || todayIsoDate(),
         updatedAt: now,
